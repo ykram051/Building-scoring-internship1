@@ -90,10 +90,17 @@ def login_form():
         st.session_state["username"] = None
     if "user_role" not in st.session_state:
         st.session_state["user_role"] = None
+    if "show_signup" not in st.session_state:
+        st.session_state["show_signup"] = False
     
     # If already logged in, show logout option
     if st.session_state["authenticated"]:
         return True
+    
+    # Show signup form if requested
+    if st.session_state.get("show_signup", False):
+        signup_form()
+        return False
     
     # Display login form in sidebar
     with st.sidebar:
@@ -104,12 +111,14 @@ def login_form():
         username = st.text_input("Username", key="login_username")
         password = st.text_input("Password", type="password", key="login_password")
         
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         with col1:
             login_button = st.button("Login")
         with col2:
-            demo_button = st.button("Demo Mode")
-            
+            signup_button = st.button("Sign Up")
+        with col3:
+            demo_button = st.button("Demo")
+        
         # Process login
         if login_button:
             if check_password(username, password, users_data):
@@ -136,6 +145,11 @@ def login_form():
                     success=False
                 )
                 st.error("Invalid username or password")
+        
+        # Process signup button
+        if signup_button:
+            st.session_state["show_signup"] = True
+            st.rerun()
                 
         # Demo mode (unauthenticated access with limited features)
         if demo_button:
@@ -155,6 +169,7 @@ def login_form():
             return True
                 
         st.info("Default credentials: admin/admin123 or user/user123")
+        st.info("Or click 'Sign Up' to create a new account!")
         return False
 
 def add_user_management():
@@ -461,3 +476,97 @@ def handle_unauthorized_access(dataset_name, action_type="view"):
     st.warning("You can only access datasets that you own or are shared with you.")
     
     return False
+
+def create_new_user(username, password, name, email=None):
+    """Create a new user in the database"""
+    try:
+        # Check if username already exists
+        users_data = get_users_data()
+        if username in users_data:
+            return False, "Username already exists"
+        
+        # Validate inputs
+        if not username or not password or not name:
+            return False, "Username, password, and name are required"
+        
+        if len(username) < 3:
+            return False, "Username must be at least 3 characters long"
+        
+        if len(password) < 6:
+            return False, "Password must be at least 6 characters long"
+        
+        # Hash the password
+        password_hash = hash_password(password)
+        
+        # Insert new user into database
+        execute_query(
+            """
+            INSERT INTO users (username, password, name, role)
+            VALUES (:username, :password, :name, :role)
+            """,
+            {
+                "username": username,
+                "password": password_hash,
+                "name": name,
+                "role": "user"  # Default role for new signups
+            }
+        )
+        
+        # Log the signup event
+        log_security_event(
+            event_type="signup",
+            username=username,
+            details={"name": name},
+            success=True
+        )
+        
+        return True, "Account created successfully!"
+        
+    except Exception as e:
+        # Log failed signup
+        log_security_event(
+            event_type="signup",
+            username=username,
+            details={"error": str(e)},
+            success=False
+        )
+        return False, f"Error creating account: {str(e)}"
+
+def signup_form():
+    """Display signup form and handle user registration"""
+    st.subheader("📝 Create Account")
+    
+    with st.form("signup_form"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            new_username = st.text_input("Username*", placeholder="Enter username (min 3 chars)")
+            new_password = st.text_input("Password*", type="password", placeholder="Enter password (min 6 chars)")
+        
+        with col2:
+            new_name = st.text_input("Full Name*", placeholder="Enter your full name")
+            # Remove email input since database doesn't support it
+        
+        st.markdown("*Required fields")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            signup_button = st.form_submit_button("Create Account", type="primary")
+        with col2:
+            cancel_button = st.form_submit_button("Cancel")
+        
+        if signup_button:
+            success, message = create_new_user(new_username, new_password, new_name)
+            
+            if success:
+                st.success(message)
+                st.info("You can now log in with your new account!")
+                # Switch back to login mode
+                st.session_state["show_signup"] = False
+                st.rerun()
+            else:
+                st.error(message)
+        
+        if cancel_button:
+            st.session_state["show_signup"] = False
+            st.rerun()
