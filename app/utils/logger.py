@@ -13,7 +13,7 @@ from pathlib import Path
 from utils.db import execute_query
 
 # Set up logging directory
-LOG_DIR = Path("logs")
+LOG_DIR = Path("../logs")
 LOG_DIR.mkdir(exist_ok=True)
 
 # Configure security logger
