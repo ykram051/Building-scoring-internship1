@@ -13,11 +13,14 @@ import shutil
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Import required modules
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent.parent / "app"))
 from utils.auth_db import get_users_data, hash_password
 
 def init_auth(reset=False):
     """Initialize the authentication system"""
-    from scripts.manage_users import add_user
+    from manage_users import add_user
     
     # Path to users.json
     data_dir = Path("data")

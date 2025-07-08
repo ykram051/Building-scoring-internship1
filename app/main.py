@@ -63,7 +63,36 @@ from models.pca import classify_pca
 from models.weighted import classify_weighted
 from models.tree_classifier import classify_robust_tree
 from models.cosine import classify_cosine
-from scripts.validate_data import add_classifications, validate_and_preprocess_dataset, ensure_classifications
+import sys
+import os
+from pathlib import Path
+
+# Add the parent directory to the Python path for importing scripts
+current_dir = Path(__file__).resolve().parent
+parent_dir = current_dir.parent
+scripts_dir = parent_dir / "scripts"
+
+# Add paths to sys.path if they're not already there
+for path in [str(parent_dir), str(scripts_dir)]:
+    if path not in sys.path:
+        sys.path.insert(0, path)
+
+try:
+    from scripts.validate_data import add_classifications, validate_and_preprocess_dataset, ensure_classifications
+    from scripts.compute_feature_ranges import compute_ranges
+    scripts_imported = True
+except ImportError as e:
+    print(f"Warning: Could not import scripts: {e}")
+    # Define fallback functions
+    def add_classifications(df, features, weights=None):
+        return df
+    def validate_and_preprocess_dataset(df, scoring_basis):
+        return df
+    def ensure_classifications(df, features, weights=None):
+        return df
+    def compute_ranges(df):
+        return {}
+    scripts_imported = False
 from visualization.map import display_map
 from visualization.charts import display_relationship_plot, display_distribution_plot
 from visualization.model_specific import display_model_visualization
@@ -73,7 +102,6 @@ from utils.building_selection import (
     display_building_lookup,
     display_building_classifications,
 )
-from scripts.compute_feature_ranges import compute_ranges
 
 # Define data directory
 data_dir = Path("data")

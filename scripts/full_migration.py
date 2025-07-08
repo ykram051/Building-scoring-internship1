@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 current_dir = Path(__file__).resolve().parent
 parent_dir = current_dir.parent
 sys.path.append(str(parent_dir))
+sys.path.append(str(parent_dir / "app"))
 
 def main():
     """Run the full migration process."""
@@ -23,7 +24,7 @@ def main():
     
     # Step 1: Initialize database
     logger.info("Step 1: Initialize database")
-    from scripts.initialize_db import initialize_database
+    from initialize_db import initialize_database
     
     if not initialize_database():
         logger.error("Database initialization failed. Aborting migration.")
@@ -34,7 +35,7 @@ def main():
     
     # Step 2: Migrate data
     logger.info("Step 2: Migrate data")
-    from scripts.migrate_to_db import run_migration
+    from migrate_to_db import run_migration
     
     if not run_migration():
         logger.error("Data migration failed.")

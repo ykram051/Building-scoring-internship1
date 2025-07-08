@@ -11,75 +11,183 @@ logging.basicConfig(level=logging.WARNING,
                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logging.getLogger('pgmpy').setLevel(logging.WARNING)
 logging.getLogger('data.data_processing').setLevel(logging.WARNING)
-# Import DB manager and initialize database connection
-try:
-    print("Attempting to connect using simple DB manager...")
-    from utils.simple_db_manager import get_simple_db_manager
-    db_manager = get_simple_db_manager()
-    if db_manager._initialized:
-        print("Database connection successful using simple DB manager!")
+# Import DB manager and initialize database connection (cached to avoid repetition)
+@st.cache_resource
+def get_database_manager():
+    """Initialize database manager with caching to avoid repetitive connections."""
+    try:
+        from utils.simple_db_manager import get_simple_db_manager
+        db_manager = get_simple_db_manager()
+        if db_manager._initialized:
+            return db_manager, "simple_db", True
+        else:
+            # Fall back to regular DB manager
+            try:
+                from utils.db_manager import get_db_manager
+                db_manager = get_db_manager()
+                if db_manager._initialized:
+                    return db_manager, "regular_db", True
+                else:
+                    return None, "failed", False
+            except Exception as e:
+                st.warning(f"Database connection issues: {str(e)}")
+                return None, "failed", False
+    except Exception as e:
+        st.warning(f"Database initialization failed: {str(e)}")
+        return None, "failed", False
+
+# Get cached database manager
+db_manager, db_type, database_available = get_database_manager()
+
+# Only show connection status once
+if "db_connection_logged" not in st.session_state:
+    if database_available and db_manager and db_manager._initialized:
+        st.success(f"✅ Database connected ({db_type})")
     else:
-        print("Failed to initialize database with simple DB manager.")
-        
-        # Fall back to regular DB manager
-        try:
-            print("Trying with regular DB manager...")
-            from utils.db_manager import get_db_manager
-            db_manager = get_db_manager()
-            if db_manager._initialized:
-                print("Database connection successful with regular DB manager!")
-            else:
-                print("Failed to initialize database with regular DB manager.")
-        except Exception as e:
-            print(f"Exception with regular DB manager: {str(e)}")
-            db_manager = None
-except Exception as e:
-    print(f"Exception when connecting to database: {str(e)}")
-    db_manager = None
+        st.warning("⚠️ Database connection failed - using fallback mode")
+    st.session_state.db_connection_logged = True
 
 # Configure pandas display
 pd.set_option("styler.render.max_elements", 500_000)
 
-# Import database utilities
-try:
-    from utils.db import execute_query
-    print("Successfully imported database utilities")
-except Exception as e:
-    print(f"Error importing database utilities: {str(e)}")
-    st.error("Failed to import database utilities")
+# Import database utilities and modules (with reduced logging)
+if 'db_modules_imported' not in st.session_state:
+    try:
+        # Try importing database modules first
+        if database_available:
+            # Import database utilities
+            from utils.db import execute_query
+            
+            # Import database version of data processing module
+            from data.data_processing import process_city_data, get_available_cities, process_uploaded_data, process_city_with_years
+            
+            # Import DB version of authentication and authorization modules
+            from utils.auth_db import (
+                login_form, check_feature_access, check_secure_feature_access, 
+                check_dataset_ownership, add_user_management, is_admin, logout
+            )
+            
+            from utils.building_editor import display_building_editor, display_edit_history, save_building_changes
+            from utils.logger import log_security_event, log_dataset_access, log_data_change
+            
+            auth_mode = "database"
+            
+        else:
+            # Use fallback mode
+            from utils.fallback_auth import (
+                fallback_login as login_form,
+                is_authenticated, get_current_user, is_admin, fallback_logout as logout
+            )
+            
+            # Stub functions for database-specific features
+            def check_feature_access(feature_name): return True
+            def check_secure_feature_access(feature_name): return True
+            def check_dataset_ownership(dataset_name): return True
+            def add_user_management(): st.info("User management requires database connection.")
+            def log_security_event(event, details): pass
+            def log_dataset_access(dataset_name, username): pass
+            def log_data_change(details): pass
+            def display_building_editor(): st.info("Building editor requires database connection.")
+            def display_edit_history(): st.info("Edit history requires database connection.")
+            def save_building_changes(changes): return False
+            
+            # Import file-based data processing
+            try:
+                from data.data_processing import process_city_data, get_available_cities, process_uploaded_data, process_city_with_years
+            except ImportError:
+                # Create stub functions if data processing fails
+                def process_city_data(city_name): return pd.DataFrame()
+                def get_available_cities(): return ["Demo City"]
+                def process_uploaded_data(file): return pd.DataFrame()
+                def process_city_with_years(city_name, years): return pd.DataFrame()
+            
+            auth_mode = "fallback"
+        
+        st.session_state.db_modules_imported = True
+        st.session_state.auth_mode = auth_mode
+        db_imports_successful = True
+        
+    except Exception as e:
+        st.error(f"Failed to import modules: {str(e)}")
+        db_imports_successful = False
+        st.stop()
+else:
+    # Modules already imported, get auth mode
+    auth_mode = st.session_state.get('auth_mode', 'fallback')
     
-# Try importing database version of modules
-try:
-    # Import database version of data processing module
-    from data.data_processing import process_city_data, get_available_cities, process_uploaded_data, process_city_with_years
-    print("Successfully imported dataprocessing_db")
-
-    # Import DB version of authentication and authorization modules
-    from utils.auth_db import (
-        login_form, check_feature_access, check_secure_feature_access, 
-        check_dataset_ownership, add_user_management, is_admin, logout
-    )
-    print("Successfully imported auth_db")
-    
-    from utils.building_editor import display_building_editor, display_edit_history, save_building_changes
-    print("Successfully imported building_editor")
-    
-    from utils.logger import log_security_event, log_dataset_access, log_data_change
-    print("Successfully imported logger")
+    if auth_mode == "database" and database_available:
+        from utils.db import execute_query
+        from data.data_processing import process_city_data, get_available_cities, process_uploaded_data, process_city_with_years
+        from utils.auth_db import (
+            login_form, check_feature_access, check_secure_feature_access, 
+            check_dataset_ownership, add_user_management, is_admin, logout
+        )
+        from utils.building_editor import display_building_editor, display_edit_history, save_building_changes
+        from utils.logger import log_security_event, log_dataset_access, log_data_change
+    else:
+        # Use fallback imports
+        from utils.fallback_auth import (
+            fallback_login as login_form,
+            is_authenticated, get_current_user, is_admin, fallback_logout as logout
+        )
+        
+        # Recreate stub functions
+        def check_feature_access(feature_name): return True
+        def check_secure_feature_access(feature_name): return True
+        def check_dataset_ownership(dataset_name): return True
+        def add_user_management(): st.info("User management requires database connection.")
+        def log_security_event(event, details): pass
+        def log_dataset_access(dataset_name, username): pass
+        def log_data_change(details): pass
+        def display_building_editor(): st.info("Building editor requires database connection.")
+        def display_edit_history(): st.info("Edit history requires database connection.")
+        def save_building_changes(changes): return False
+        
+        try:
+            from data.data_processing import process_city_data, get_available_cities, process_uploaded_data, process_city_with_years
+        except ImportError:
+            def process_city_data(city_name): return pd.DataFrame()
+            def get_available_cities(): return ["Demo City"]
+            def process_uploaded_data(file): return pd.DataFrame()
+            def process_city_with_years(city_name, years): return pd.DataFrame()
     
     db_imports_successful = True
-    print("All database modules imported successfully")
-except Exception as e:
-    print(f"Error importing database modules: {str(e)}")
-    st.error(f"Failed to import database modules: {str(e)}")
-    db_imports_successful = False
 
 from models.mahalanobis import classify_mahalanobis
 from models.pca import classify_pca
 from models.weighted import classify_weighted
 from models.tree_classifier import classify_robust_tree
 from models.cosine import classify_cosine
-from scripts.validate_data import add_classifications, validate_and_preprocess_dataset, ensure_classifications
+import sys
+import os
+from pathlib import Path
+
+# Add the parent directory to the Python path for importing scripts
+current_dir = Path(__file__).resolve().parent
+parent_dir = current_dir.parent
+scripts_dir = parent_dir / "scripts"
+
+# Add paths to sys.path if they're not already there
+for path in [str(parent_dir), str(scripts_dir)]:
+    if path not in sys.path:
+        sys.path.insert(0, path)
+
+try:
+    from scripts.validate_data import add_classifications, validate_and_preprocess_dataset, ensure_classifications
+    from scripts.compute_feature_ranges import compute_ranges
+    scripts_imported = True
+except ImportError as e:
+    print(f"Warning: Could not import scripts: {e}")
+    # Define fallback functions
+    def add_classifications(df, features, weights=None):
+        return df
+    def validate_and_preprocess_dataset(df, scoring_basis):
+        return df
+    def ensure_classifications(df, features, weights=None):
+        return df
+    def compute_ranges(df):
+        return {}
+    scripts_imported = False
 from visualization.map import display_map
 from visualization.charts import display_relationship_plot, display_distribution_plot
 from visualization.model_specific import display_model_visualization
@@ -95,7 +203,6 @@ from utils.building_selection import (
     display_building_lookup,
     display_building_classifications,
 )
-from scripts.compute_feature_ranges import compute_ranges
 
 # Set page config with icon and expanded layout
 st.set_page_config(
@@ -168,17 +275,53 @@ def get_filtered_df(df, year=None):
         # Return the original dataframe if there was an error
         return df.copy() if df is not None else None
 
-# Load CSS from external file
-load_css("styles.css")
+# Load CSS from external file (cached to avoid repetition)
+@st.cache_resource
+def load_app_css():
+    """Load CSS with caching to avoid repetitive loading."""
+    from utils.css_loader import load_css
+    load_css("styles.css")
+    return True
 
-# Authentication system
-if not login_form():
-    # If not authenticated, show only login form and stop execution
-    st.stop()
+# Load CSS
+load_app_css()
 
-# Display admin badge if user is admin
-user_role = st.session_state.get("user_role")
-username = st.session_state.get("username", "Guest")
+# Authentication system (only show login if not already authenticated)
+auth_mode = st.session_state.get('auth_mode', 'fallback')
+
+if auth_mode == "fallback":
+    # Use fallback authentication
+    if not st.session_state.get("authenticated", False):
+        if not login_form():
+            # If not authenticated, show only login form and stop execution
+            st.stop()
+    else:
+        # User is already authenticated, just validate session
+        if "username" not in st.session_state or not st.session_state.get("username"):
+            # Session seems corrupted, reset
+            st.session_state.authenticated = False
+            st.rerun()
+else:
+    # Use database authentication
+    if not st.session_state.get("authenticated", False):
+        if not login_form():
+            # If not authenticated, show only login form and stop execution
+            st.stop()
+    else:
+        # User is already authenticated, just validate session
+        if "username" not in st.session_state or not st.session_state.get("username"):
+            # Session seems corrupted, reset
+            st.session_state.authenticated = False
+            st.rerun()
+
+# Display user info and admin badge
+if auth_mode == "fallback":
+    user_info = get_current_user()
+    username = st.session_state.get("username", "Guest")
+    user_role = user_info.get("role", "user") if user_info else "user"
+else:
+    user_role = st.session_state.get("user_role", "user")
+    username = st.session_state.get("username", "Guest")
 
 if user_role == "admin":
     st.sidebar.markdown("### 👑 Admin Mode")
@@ -186,6 +329,12 @@ if user_role == "admin":
 else:
     role_display = user_role.capitalize() if user_role else "User"
     st.sidebar.info(f"Logged in as: **{username}** ({role_display})")
+
+# Authentication mode indicator
+if auth_mode == "fallback":
+    st.sidebar.caption("🔄 Fallback Authentication Mode")
+else:
+    st.sidebar.caption("🗃️ Database Authentication Mode")
 
 # Add logout button
 if st.sidebar.button("📤 Logout"):
@@ -195,18 +344,35 @@ if st.sidebar.button("📤 Logout"):
 # App header with gradient
 st.markdown('<div class="main-header"><h1 style="text-align: center;"> Building Analytics Dashboard</h1></div>', unsafe_allow_html=True)
 
-# Display DB mode status
-if 'db_manager' in locals() and db_manager and db_manager._initialized and db_imports_successful:
-    st.success("✅ Database mode active - Connected to PostgreSQL database")
-else:
-    st.warning("⚠️ Database mode active but with issues - Check logs for details")
-    with st.expander("Database Connection Details"):
-        if 'db_manager' not in locals() or not db_manager:
-            st.error("Database manager initialization failed")
-        elif not db_manager._initialized:
-            st.error("Database connection not initialized")
-        if not db_imports_successful:
-            st.error("Database module imports failed")
+# Display DB mode status (only show once per session)
+if 'db_status_shown' not in st.session_state:
+    auth_mode = st.session_state.get('auth_mode', 'fallback')
+    
+    if database_available and db_manager and db_manager._initialized and db_imports_successful:
+        st.success("✅ Database mode active - Connected to PostgreSQL database")
+    elif auth_mode == "fallback":
+        st.info("🔄 Running in fallback mode - Using file-based authentication and data")
+        with st.expander("Database Connection Details"):
+            st.warning("PostgreSQL database is not available. The app is running with limited functionality:")
+            st.text("• Using file-based authentication")
+            st.text("• Limited dataset management")
+            st.text("• No user management features")
+            st.text("• No audit logging")
+            st.text("")
+            st.text("To enable full functionality:")
+            st.text("1. Install and start PostgreSQL")
+            st.text("2. Run: docker-compose up -d")
+            st.text("3. Or run: python scripts/setup_database.py")
+    else:
+        st.warning("⚠️ Database mode active but with issues - Check logs for details")
+        with st.expander("Database Connection Details"):
+            if not db_manager:
+                st.error("Database manager initialization failed")
+            elif not db_manager._initialized:
+                st.error("Database connection not initialized")
+            if not db_imports_successful:
+                st.error("Database module imports failed")
+    st.session_state.db_status_shown = True
 
 # Initialize session state for comparison and data
 if 'comparison_buildings' not in st.session_state:
@@ -261,8 +427,10 @@ with st.sidebar:
                 return label
         return option
 
-    # Show a success message that we're in DB mode
-    st.success("Running in database mode")
+    # Show a success message that we're in DB mode (only once per session)
+    if 'db_mode_message_shown' not in st.session_state:
+        st.success("Running in database mode")
+        st.session_state.db_mode_message_shown = True
 
     dataset_option = st.selectbox(
         "Choose Dataset",

@@ -30,7 +30,7 @@ class SimpleDBManager:
             db_port = os.environ.get("DB_PORT", "5432")
             db_name = os.environ.get("DB_NAME", "building_analytics")
             db_user = os.environ.get("DB_USER", "postgres")
-            db_password = os.environ.get("DB_PASSWORD", "postgres")
+            db_password = os.environ.get("DB_PASSWORD", "root")
             
             # Create connection string directly
             conn_string = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
@@ -47,6 +47,14 @@ class SimpleDBManager:
             return True
         except Exception as e:
             logger.error(f"Failed to initialize database: {e}")
+            # Provide helpful error messages for common issues
+            error_str = str(e).lower()
+            if "password authentication failed" in error_str:
+                logger.error("Database password authentication failed. Check your credentials or run setup_database.py")
+            elif "could not connect" in error_str or "connection refused" in error_str:
+                logger.error("Could not connect to PostgreSQL. Make sure PostgreSQL is running or use Docker Compose")
+            elif "utf-8" in error_str or "decode" in error_str:
+                logger.error("Database encoding issue. Check data integrity or character encoding settings")
             return False
             
     def get_engine(self):

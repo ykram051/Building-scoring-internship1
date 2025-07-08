@@ -12,6 +12,7 @@ import sys
 
 # Add the parent directory to path so we can import our modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app"))
 
 from utils.db import initialize_db, dataframe_to_sql, execute_query, query_to_dataframe
 

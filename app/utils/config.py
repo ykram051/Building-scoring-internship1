@@ -45,7 +45,7 @@ try:
             "port": os.environ.get("DB_PORT", "5432"),
             "database": os.environ.get("DB_NAME", "building_analytics"),
             "user": os.environ.get("DB_USER", "postgres"),
-            "password": os.environ.get("DB_PASSWORD", "postgres")
+            "password": os.environ.get("DB_PASSWORD", "root")
         }
 except ImportError:
     # Streamlit not available or not being used
@@ -54,7 +54,7 @@ except ImportError:
         "port": os.environ.get("DB_PORT", "5432"),
         "database": os.environ.get("DB_NAME", "building_analytics"),
         "user": os.environ.get("DB_USER", "postgres"),
-        "password": os.environ.get("DB_PASSWORD", "postgres")
+        "password": os.environ.get("DB_PASSWORD", "root")
     }
 
 # File paths (maintained for migration purposes only)
