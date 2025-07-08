@@ -1,0 +1,369 @@
+/* Modern Enterprise UI Styles - Dark Blue Theme */
+.main {
+    background-color: #0e1117; /* Dark blue-black background matching the screenshot */
+    color: #ffffff; /* White text for dark background */
+}
+
+/* Authentication Styles */
+.stTextInput > div > div > input {
+    color: #ffffff;
+}
+
+/* Admin badge styling */
+.admin-badge {
+    background-color: #ff9800;
+    color: #000000;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 0.8em;
+    font-weight: bold;
+    margin-left: 5px;
+}
+
+/* Improved form styling */
+[data-testid="stForm"] {
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 20px;
+    border-radius: 5px;
+    background-color: rgba(30, 37, 54, 0.4);
+}
+
+/* Role-based color indicators */
+.admin-mode {
+    border-left: 4px solid #ff9800;
+    padding-left: 10px;
+}
+
+.user-mode {
+    border-left: 4px solid #2196f3;
+    padding-left: 10px;
+}
+
+.demo-mode {
+    border-left: 4px solid #9e9e9e;
+    padding-left: 10px;
+}
+
+/* User management styles */
+.user-card {
+    background-color: rgba(30, 37, 54, 0.6);
+    padding: 15px;
+    border-radius: 5px;
+    margin-bottom: 10px;
+}
+
+/* Header gradient */
+.main-header {
+    background: linear-gradient(90deg, #1e2536, #0d47a1); /* Deeper blue gradient matching screenshot */
+    color: white;
+    padding: 1.5rem;
+    border-radius: 0px;
+    margin-bottom: 0.5rem;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+}
+
+/* Cards */
+.card {
+    background-color: #1e2130; /* Dark navy card background matching the screenshot */
+    border-radius: 8px;
+    padding: 1.5rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    margin-bottom: 1rem;
+    border: 1px solid #2d3748; /* Slightly lighter border */
+    color: #ffffff; /* White text */
+}
+
+/* Metric cards */
+.metric-card {
+    text-align: center;
+    padding: 1rem;
+    border-radius: 6px;
+    background: #1e2130; /* Dark navy background */
+    box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+    border: 1px solid #2d3748;
+    transition: transform 0.2s;
+    color: #ffffff; /* White text */
+}
+
+.metric-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 3px 6px rgba(0,0,0,0.4);
+}
+
+.metric-card h2, 
+.metric-card h3, 
+.metric-card p {
+    color: #ffffff !important; /* Ensure text is white */
+}
+
+/* Clean up layout */
+.css-1d391kg {
+    padding-top: 1rem;
+    color: #ffffff; /* White text */
+}
+
+/* Hide default Streamlit header and footer */
+#MainMenu, footer {visibility: hidden;}
+
+/* Custom tabs */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 4px;
+    background-color: #0e1117; /* Dark blue-black background */
+}
+
+.stTabs [data-baseweb="tab"] {
+    height: 40px;
+    white-space: nowrap;
+    background-color: #1e2130; /* Dark navy tab */
+    border-radius: 4px 4px 0 0;
+    padding: 0 16px;
+    font-weight: 500;
+    font-size: 0.9rem;
+    color: #e0e0e0; /* Light text for contrast */
+}
+
+.stTabs [aria-selected="true"] {
+    background-color: #1e5bbc !important; /* Bright blue active tab matching screenshot */
+    color: #ffffff !important;
+}
+
+/* Filter panel styling */
+.filter-panel {
+    background-color: #1e1e1e; /* Dark panel */
+    padding: 1rem;
+    border-radius: 8px;
+    margin-bottom: 1rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    border: 1px solid #333333;
+    color: #ffffff; /* White text */
+}
+
+/* Larger map container */
+.map-container {
+    height: 600px;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+    margin-bottom: 1rem;
+    border: 1px solid #333333;
+}
+
+/* Compact form elements */
+.stSlider, .stSelectbox, .stTextInput {
+    margin-bottom: 0.5rem;
+}
+
+/* Status bar */
+.status-bar {
+    background-color: #1e1e1e; /* Dark status bar */
+    padding: 0.5rem 1rem;
+    border-radius: 4px;
+    margin-bottom: 1rem;
+    font-size: 0.9rem;
+    color: #ffffff; /* White text */
+    border: 1px solid #333333;
+}
+
+/* Full screen map container */
+.full-map-container {
+    position: relative;
+    height: 100vh;
+    width: 100%;
+    overflow: hidden;
+    margin: 0;
+    padding: 0;
+    background-color: #121212; /* Match main background */
+}
+
+/* Slide-in panel styling */
+.slide-panel {
+    position: absolute;
+    background-color: #121212; /* Match main background color */
+    border-radius: 8px;
+    box-shadow: 0 0 10px rgba(0,0,0,0.4);
+    padding: 15px;
+    transition: transform 0.3s ease-in-out;
+    z-index: 1000;
+    max-height: 85vh;
+    overflow-y: auto;
+    color: #ffffff; /* White text */
+    border: 1px solid #333333;
+}
+
+.slide-panel-left {
+    left: 0;
+    top: 0;
+    width: 300px;
+    height: 100%;
+    transform: translateX(-100%);
+}
+
+.slide-panel-right {
+    right: 0;
+    top: 0;
+    width: 300px;
+    height: 100%;
+    transform: translateX(100%);
+}
+
+.slide-panel-visible-left {
+    transform: translateX(0);
+}
+
+.slide-panel-visible-right {
+    transform: translateX(0);
+}
+
+.panel-toggle {
+    position: absolute;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 60px;
+    background-color: #121212; /* Match main background color */
+    border-radius: 0 8px 8px 0;
+    box-shadow: 2px 0 5px rgba(0,0,0,0.3);
+    cursor: pointer;
+    z-index: 999;
+    color: #ffffff; /* White text/icon */
+    border: 1px solid #333333;
+}
+
+.panel-toggle-left {
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+.panel-toggle-right {
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    border-radius: 8px 0 0 8px;
+}
+
+/* Override Streamlit component colors for dark theme */
+.stMarkdown, 
+.stText {
+    color: #ffffff !important; /* White text for dark background */
+}
+
+/* Form elements with better contrast */
+.stSelectbox,
+.stMultiSelect,
+.stTextInput,
+.stNumber {
+    color: #ffffff !important;
+    background-color: #2d2d2d !important;
+    border-color: #444444 !important;
+}
+
+/* Ensure data tables have proper contrast */
+.stTable, 
+.dataframe {
+    color: #ffffff !important;
+    background-color: #1e1e1e !important;
+    border-color: #333333 !important;
+}
+
+/* Data table headers */
+thead tr th {
+    background-color: #2d2d2d !important;
+    color: #ffffff !important;
+}
+
+/* Data table cells */
+tbody tr td {
+    background-color: #1e1e1e !important;
+    color: #ffffff !important;
+}
+
+/* Alternating rows for better readability */
+tbody tr:nth-child(even) td {
+    background-color: #252525 !important;
+}
+
+/* Metric display */
+.stMetric {
+    color: #ffffff !important;
+    background-color: #1e1e1e !important;
+    border-radius: 6px;
+    padding: 0.5rem;
+    border: 1px solid #333333;
+}
+
+/* Sidebar styling */
+.stSidebar {
+    background-color: #0e1117 !important; /* Dark blue-black to match main background */
+    color: #ffffff !important;
+    border-right: 1px solid #1e2130; /* Slightly lighter border for definition */
+}
+
+.stSidebar .stMarkdown,
+.stSidebar .stText,
+.stSidebar h1, 
+.stSidebar h2, 
+.stSidebar h3 {
+    color: #ffffff !important;
+}
+
+/* Headers for consistency */
+h1, h2, h3, h4, h5, h6 {
+    color: #ffffff !important;
+}
+
+/* Button styling */
+.stButton > button {
+    background-color: #0077cc !important;
+    color: white !important;
+    border: none !important;
+    border-radius: 4px !important;
+}
+
+.stButton > button:hover {
+    background-color: #0066b3 !important;
+}
+
+/* Code blocks */
+.stCode, code {
+    background-color: #2d2d2d !important;
+    color: #e0e0e0 !important;
+    border: 1px solid #444444 !important;
+}
+
+/* Charts and plots */
+.stPlot, .js-plotly-plot {
+    background-color: #1e1e1e !important;
+    border-radius: 8px;
+    padding: 0.5rem;
+    border: 1px solid #333333;
+}
+
+/* Tooltips */
+.tooltip, [data-tooltip] {
+    background-color: #2d2d2d !important;
+    color: #ffffff !important;
+    border: 1px solid #444444 !important;
+}
+
+/* Radio buttons and checkboxes */
+.stRadio > div,
+.stCheckbox > div {
+    color: #ffffff !important;
+}
+
+/* Progress bar */
+.stProgress > div > div {
+    background-color: #0077cc !important;
+}
+
+/* Streamlit slider */
+.stSlider > div > div > div {
+    color: #ffffff !important;
+}
+
+/* Make sure all text elements inherit the dark theme */
+div, p, span, label {
+    color: #ffffff;
+}
