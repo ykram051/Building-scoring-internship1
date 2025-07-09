@@ -17,7 +17,7 @@ This guide explains how to deploy the Building Analytics Dashboard as a web appl
    - Fork/push this repository to GitHub
    - Go to [Streamlit Cloud](https://streamlit.io/cloud) and log in
    - Click "New app" and select your repository
-   - Set the main file path to: `app/main.py`
+   - Set the main file path to: `app/main_db.py`
    - In "Advanced settings" → "Secrets", add your database credentials:
      ```toml
      [postgres]

@@ -24,7 +24,7 @@ The project has been reorganized for better maintainability:
 ### Core Components
 
 - `app/main_db.py` - Main application with database integration
-- `app/main.py` - File-based version of the application
+- `app/main_db.py` - Main database-integrated application
 - `app/data/data_processing.py` - Unified data processing module
 - `app/utils/` - Utilities for authentication, logging, and building data management
 - `app/models/` - Classification models for energy efficiency analysis

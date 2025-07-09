@@ -60,7 +60,7 @@ def init_app():
     
     print("Application initialized successfully")
     print("\nTo run the application, use the following command:")
-    print("streamlit run main.py")
+    print("streamlit run main_db.py")
 
 def main():
     """Main function"""

@@ -29,4 +29,4 @@ ENV STRICT_DB_MODE=true
 EXPOSE 8501
 
 # Command to run the application
-CMD ["streamlit", "run", "main.py"]
+CMD ["streamlit", "run", "main_db.py"]
