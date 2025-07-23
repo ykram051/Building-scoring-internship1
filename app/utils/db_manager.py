@@ -68,13 +68,11 @@ class DatabaseManager:
             return None
             
         try:
-            with self._engine.connect() as conn:
+            with self._engine.begin() as conn:  # Use begin() for auto-commit transaction
                 if params:
                     result = conn.execute(text(query), params)
                 else:
                     result = conn.execute(text(query))
-                
-                conn.commit()
                 
                 if fetch and result.returns_rows:
                     return result.fetchall()
@@ -93,7 +91,8 @@ class DatabaseManager:
             return pd.DataFrame()
             
         try:
-            return pd.read_sql_query(text(query), self._engine, params=params)
+            with self._engine.connect() as conn:  # Use connection for pandas compatibility
+                return pd.read_sql_query(text(query), conn, params=params)
         except Exception as e:
             logger.error(f"Error executing query to DataFrame: {e}")
             return pd.DataFrame()

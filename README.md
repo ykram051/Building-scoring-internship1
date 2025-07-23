@@ -10,6 +10,7 @@ A Streamlit-based dashboard for analyzing building energy efficiency with multip
 - Data export and reporting
 - Year-over-year analytics
 - City-to-city comparisons
+- **🤖 AI Assistant**: Intelligent chatbot for data analysis and feature explanations
 - **NEW**: PostgreSQL database integration
   - Scalable storage solution for large building datasets
   - High-performance database queries
@@ -24,7 +25,6 @@ The project has been reorganized for better maintainability:
 ### Core Components
 
 - `app/main_db.py` - Main application with database integration
-- `app/main_db.py` - Main database-integrated application
 - `app/data/data_processing.py` - Unified data processing module
 - `app/utils/` - Utilities for authentication, logging, and building data management
 - `app/models/` - Classification models for energy efficiency analysis
@@ -86,33 +86,66 @@ python app/scripts/manage_users.py delete username
 
 ## Installation
 
+### Prerequisites
+- Python 3.8+ with conda/anaconda
+- PostgreSQL 12+ (optional - app can run in fallback mode)
+
+### Setup Steps
+
 1. Clone the repository
 2. Install dependencies:
    ```bash
+   # Install via conda (recommended)
+   conda install -c conda-forge streamlit pandas numpy plotly
+   
+   # Install AI chatbot dependencies via pip
+   pip install openai langchain langchain-openai langchain-experimental pandasai tiktoken
+   
+   # Or install all at once
    pip install -r app/requirements.txt
    ```
-3. Set up PostgreSQL:
+
+3. Set up PostgreSQL (Optional):
    - Install PostgreSQL from [postgresql.org](https://www.postgresql.org/download/)
    - Create a database called `building_analytics` (or use a name of your choice)
-   - Update the database credentials in `app/.env`
+   - Update the database credentials in `.env`
 
-4. Run the application:
-   ```bash
-   # On Windows
-   ./run.bat
-   
-   # On Linux/Mac
-   ./run.sh
-   ```
-   
-   Or to initialize the database first and then run:
-   ```bash
-   # On Windows
-   ./run_with_init.bat
-   
-   # On Linux/Mac
-   ./run_with_init.sh
-   ```
+4. Configure AI Assistant (Optional):
+   - Get an OpenAI API key from [OpenAI Platform](https://platform.openai.com/api-keys)
+   - Add it to `.streamlit/secrets.toml`:
+     ```toml
+     [openai]
+     api_key = "your-openai-api-key-here"
+     ```
+
+## 🚀 **Quick Start** 
+
+**The chatbot requires the conda environment where langchain is installed.**
+
+### Option 1: Manual Startup (Recommended)
+```bash
+# 1. Open Anaconda Prompt or PowerShell
+# 2. Navigate to project directory
+cd "c:\Users\USER\Desktop\Building_Scoring_internship\Building-scoring"
+
+# 3. Activate conda environment
+conda activate base
+
+# 4. Go to app directory and run
+cd app
+streamlit run main_db.py
+```
+
+### Option 2: Direct Conda Command
+```bash
+# Run directly with conda (from Building-scoring directory)
+conda run streamlit run app/main_db.py
+```
+
+### ⚠️ **Important Note**
+- Running with regular `python` or `streamlit` will show "Chatbot module not available" 
+- You **must** use the conda environment where langchain packages are installed
+- All other features work fine, only the AI chatbot requires conda environment
    
 ## Deployment Options
 
@@ -237,19 +270,42 @@ If you're setting up the application locally for development or administration:
    # Application Settings
    DEBUG=false
    LOG_LEVEL=INFO
+   
+   # AI Assistant (Optional)
+   OPENAI_API_KEY=your-openai-api-key-here
    ```
 
-3. Initialize the database:
+3. **🤖 Enable AI Assistant**:
+   
+   The AI Assistant provides intelligent help with data analysis and is **already configured** with all required dependencies.
+   
+   **To enable full functionality** (optional):
+   - Get an OpenAI API key from https://platform.openai.com/api-keys
+   - Add it to `.streamlit/secrets.toml`:
+     ```toml
+     [openai]
+     api_key = "your-openai-api-key-here"
+     ```
+   
+   **Without an API key**, the chatbot will run in demo mode with limited functionality.
+   
+   The AI Assistant provides:
+   - Natural language data queries ("Show me the worst performing buildings")
+   - Automated chart generation
+   - ML model explanations
+   - Dataset insights and analysis
+
+4. **Database Setup**:
    ```
    python app/scripts/setup_database.py
    ```
 
-4. Migrate existing CSV data to the database:
+5. **Migrate Existing CSV Data**:
    ```
    python app/scripts/migrate_to_db.py
    ```
 
-5. Run the application:
+6. **Run the Application**:
    ```
    streamlit run app/main_db.py
    ```

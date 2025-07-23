@@ -1,10 +1,16 @@
 import pandas as pd
 import numpy as np
+import warnings
+import logging
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import QuantileTransformer, StandardScaler
 from sklearn.compose import ColumnTransformer
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.metrics import classification_report, accuracy_score
+
+# Suppress LightGBM warnings
+warnings.filterwarnings('ignore', category=UserWarning, module='lightgbm')
+logging.getLogger('lightgbm').setLevel(logging.ERROR)
 
 # Try to import LightGBM, but provide a fallback option if it's not available
 try:
@@ -82,7 +88,9 @@ def classify_robust_tree(
         base_model = LGBMClassifier(
             n_estimators=100,
             class_weight='balanced',
-            random_state=random_state
+            random_state=random_state,
+            verbosity=-1,  # Suppress all output
+            verbose=-1     # Additional silence parameter
         )
     else:
         # Use RandomForest as a fallback

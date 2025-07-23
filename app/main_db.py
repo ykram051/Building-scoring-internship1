@@ -6,11 +6,18 @@ import logging
 import json
 import os
 import time
+import warnings
+
 # Configure logging to reduce verbosity
 logging.basicConfig(level=logging.WARNING, 
                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logging.getLogger('pgmpy').setLevel(logging.WARNING)
 logging.getLogger('data.data_processing').setLevel(logging.WARNING)
+
+# Suppress LightGBM warnings
+logging.getLogger('lightgbm').setLevel(logging.ERROR)
+warnings.filterwarnings('ignore', category=UserWarning, module='lightgbm')
+warnings.filterwarnings('ignore', message='.*No further splits with positive gain.*')
 # Import DB manager and initialize database connection (cached to avoid repetition)
 @st.cache_resource
 def get_database_manager():
@@ -936,7 +943,8 @@ base_tabs = [
     "Analytics & Insights", 
     "City Statistics",
     "Year-over-Year Comparison",
-    "Compare Cities"
+    "Compare Cities",
+    "🤖 AI Assistant"  # New chatbot tab
 ]
 
 # Define restricted tabs
@@ -1974,87 +1982,29 @@ with tab_objects[tab_index]:
         Contact your administrator for access to this feature.
         """)
 
-# Admin tab (only shown to admin users)
-# Admin Settings tab (only for admin users)
-if "Admin Settings" in tabs:
+# AI Assistant tab (available to all users)
+if "🤖 AI Assistant" in tabs:
     with tab_objects[tab_index]:
         tab_index += 1
-        st.header("👑 Admin Settings")
         
-        admin_section = st.radio(
-            "Select Admin Function",
-            ["User Management", "System Settings", "Data Management"],
-            horizontal=True
-        )
-        
-        if admin_section == "User Management":
-            # User management functionality
-            add_user_management()
+        # Import and render chatbot
+        try:
+            from utils.chatbot import render_chatbot_tab, show_chat_examples
             
-        elif admin_section == "System Settings":
-            st.subheader("System Settings")
+            # Show chat examples in sidebar
+            show_chat_examples()
             
-            st.info("These settings control the behavior of the dashboard application.")
+            # Render the main chatbot interface
+            # Pass the current filtered dataset to the chatbot
+            current_dataset = filtered_df if not filtered_df.empty else None
+            render_chatbot_tab(current_dataset)
             
-            # Example system settings
-            col1, col2 = st.columns(2)
-            with col1:
-                st.checkbox("Enable dark mode by default", value=False)
-                st.checkbox("Enable experimental features", value=False)
-                st.number_input("Session timeout (minutes)", min_value=5, max_value=120, value=30, step=5)
-            
-            with col2:
-                st.checkbox("Enable audit logging", value=True)
-                st.selectbox("Default classification method", 
-                            ["cosine Distance", "Mahalanobis Distance", "PCA Classification", 
-                             "Weighted Classification", "tree Classification", "Topsis"])
-                st.selectbox("Default city", available_cities)
-            
-            if st.button("Save System Settings"):
-                st.success("Settings saved successfully!")
-                
-        elif admin_section == "Data Management":
-            st.subheader("Data Management")
-            
-            # Data management functions
-            data_function = st.selectbox(
-                "Select Function",
-                ["Backup Data", "Restore Data", "Clear Cache", "Reprocess City Data"]
-            )
-            
-            if data_function == "Backup Data":
-                st.info("Create a backup of all city data")
-                backup_name = st.text_input("Backup Name", f"backup_{datetime.now().strftime('%Y%m%d')}")
-                
-                if st.button("Create Backup"):
-                    st.success(f"Backup '{backup_name}' created successfully!")
-                    
-            elif data_function == "Restore Data":
-                st.info("Restore data from a previous backup")
-                # This would list available backups
-                st.selectbox("Select Backup", ["backup_20240101", "backup_20240215"])
-                
-                if st.button("Restore Selected Backup"):
-                    st.warning("This will overwrite current data. Are you sure?")
-                    if st.checkbox("Confirm restore"):
-                        st.success("Data restored successfully!")
-                        
-            elif data_function == "Clear Cache":
-                st.info("Clear application cache")
-                
-                if st.button("Clear Cache"):
-                    # This would clear cached data
-                    st.cache_data.clear()
-                    st.success("Cache cleared successfully!")
-                    
-            elif data_function == "Reprocess City Data":
-                st.info("Reprocess data for a specific city")
-                reprocess_city = st.selectbox("Select City", available_cities)
-                
-                if st.button("Reprocess Data"):
-                    with st.spinner(f"Reprocessing data for {reprocess_city}..."):
-                        # This would call the appropriate processing function
-                        st.success(f"Data for {reprocess_city} reprocessed successfully!")
+        except ImportError as e:
+            st.error("Chatbot module not available. Please install required dependencies.")
+            st.code("pip install openai langchain langchain-openai langchain-experimental pandasai tiktoken")
+        except Exception as e:
+            st.error(f"Error loading chatbot: {str(e)}")
+            st.info("The AI Assistant requires an OpenAI API key. Please configure it in your secrets.toml file.")
 
 st.markdown("""
     <div style="text-align: center; margin-top: 30px; padding: 10px; background-color: #f8f9fa; border-radius: 5px;">

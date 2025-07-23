@@ -28,6 +28,13 @@ The **Building Analytics Dashboard** is a sophisticated web-based application bu
 - **Model-Specific Visualizations**: Tailored visualizations for each scoring model
 - **Export Capabilities**: Generate reports and export analysis results
 
+### 4. AI-Powered Assistant
+- **Intelligent Chatbot**: Natural language interface for dataset analysis
+- **Smart Querying**: Ask questions like "Show me the top 10 buildings with worst energy efficiency"
+- **Automated Chart Generation**: Creates visualizations based on natural language requests
+- **Feature Explanations**: Explains ML models and application features
+- **LangChain Integration**: Advanced data analysis using pandas agents
+
 ## Technical Architecture
 
 ### Backend Infrastructure
@@ -36,6 +43,7 @@ The **Building Analytics Dashboard** is a sophisticated web-based application bu
 - **Authentication**: Secure user authentication with password hashing (SHA-256)
 - **Session Management**: Streamlit session state management
 - **Logging**: Comprehensive audit and security logging system
+- **AI Integration**: OpenAI GPT models with LangChain for intelligent assistance
 
 ### Frontend Interface
 - **Modern UI**: Dark theme with custom CSS styling
@@ -108,6 +116,7 @@ Building-scoring/
 │   │   ├── roles.py            # Role management
 │   │   ├── metrics.py          # Performance metrics
 │   │   ├── export.py           # Data export utilities
+│   │   ├── chatbot.py          # AI Assistant chatbot
 │   │   └── building_*.py       # Building-specific utilities
 │   └── visualization/           # Visualization modules
 │       ├── charts.py           # Chart generation
@@ -177,6 +186,13 @@ CREATE TABLE users (
 - **System Monitoring**: Real-time system status and performance
 - **Data Management**: Bulk data operations and maintenance
 - **Audit Reports**: Comprehensive activity and security reporting
+
+### 5. AI Assistant Features
+- **Natural Language Queries**: Ask questions about your data in plain English
+- **Automated Analysis**: "Show me buildings with poor energy efficiency"
+- **Smart Visualizations**: Generate charts based on conversational requests
+- **Feature Education**: Learn about ML models and dashboard capabilities
+- **Dataset Intelligence**: Get insights and summaries of uploaded data
 
 ## Development Features
 

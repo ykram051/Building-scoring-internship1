@@ -39,7 +39,7 @@ class SimpleDBManager:
             self._engine = create_engine(conn_string)
             
             # Test connection
-            with self._engine.connect() as conn:
+            with self._engine.begin() as conn:  # Use begin() for SQLAlchemy 2.0+ compatibility
                 conn.execute(text("SELECT 1"))
                 
             self._initialized = True

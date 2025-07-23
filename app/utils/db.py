@@ -47,7 +47,7 @@ def initialize_db():
         engine = get_db_engine()
         
         # Create users table
-        with engine.connect() as conn:
+        with engine.begin() as conn:  # Use begin() for auto-commit transaction
             conn.execute(text("""
             CREATE TABLE IF NOT EXISTS users (
                 username VARCHAR(50) PRIMARY KEY,
@@ -132,8 +132,6 @@ def initialize_db():
                 changes JSONB
             );
             """))
-            
-            conn.commit()
         
         logger.info("Database initialized successfully")
         return True
@@ -145,13 +143,11 @@ def execute_query(query, params=None, fetch=True):
     """Execute a query with parameters and optionally fetch results."""
     try:
         engine = get_db_engine()
-        with engine.connect() as conn:
+        with engine.begin() as conn:  # Use begin() for auto-commit transaction
             if params:
                 result = conn.execute(text(query), params)
             else:
                 result = conn.execute(text(query))
-                
-            conn.commit()
             
             if fetch and result.returns_rows:
                 return result.fetchall()
@@ -164,7 +160,8 @@ def query_to_dataframe(query, params=None):
     """Execute a query and return results as a pandas DataFrame."""
     try:
         engine = get_db_engine()
-        return pd.read_sql_query(text(query), engine, params=params)
+        with engine.connect() as conn:  # Use connection for pandas compatibility
+            return pd.read_sql_query(text(query), conn, params=params)
     except SQLAlchemyError as e:
         logger.error(f"Error executing query to DataFrame: {e}")
         raise

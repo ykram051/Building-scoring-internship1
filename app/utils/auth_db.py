@@ -411,10 +411,9 @@ def check_dataset_ownership(dataset_name):
     # Admins have ownership rights to all datasets
     if user_role == "admin":
         log_dataset_access(
-            dataset_name=dataset_name,
             username=username,
-            action="ownership_check",
-            allowed=True
+            dataset=dataset_name,
+            purpose="ownership_check_admin_access"
         )
         return True
     
@@ -463,10 +462,9 @@ def handle_unauthorized_access(dataset_name, action_type="view"):
     
     # Log unauthorized access attempt
     log_dataset_access(
-        dataset_name=dataset_name,
         username=username,
-        action=f"unauthorized_{action_type}",
-        allowed=False
+        dataset=dataset_name,
+        purpose=f"unauthorized_{action_type}"
     )
     
     # Show visual indicator
