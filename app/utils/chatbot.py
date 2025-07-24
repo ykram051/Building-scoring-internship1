@@ -1,6 +1,7 @@
 """
 AI Chatbot Assistant for Building Analytics Dashboard
 Provides intelligent assistance for dataset analysis, feature explanations, and chart generation
+Now powered by Google Gemini (FREE!)
 """
 
 import streamlit as st
@@ -12,11 +13,15 @@ import json
 import re
 from datetime import datetime
 
-# LangChain imports
-from langchain_experimental.agents import create_pandas_dataframe_agent
-from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_community.callbacks.streamlit import StreamlitCallbackHandler
+# Google Gemini imports
+try:
+    import google.generativeai as genai
+    from langchain_google_genai import ChatGoogleGenerativeAI
+    from langchain_experimental.agents import create_pandas_dataframe_agent
+    from langchain_core.messages import HumanMessage, SystemMessage
+    GEMINI_AVAILABLE = True
+except ImportError:
+    GEMINI_AVAILABLE = False
 
 # Local imports
 from utils.logger import log_security_event
@@ -24,28 +29,37 @@ from utils.auth_db import get_user_role
 
 
 class BuildingChatbot:
-    """AI Assistant for Building Analytics Dashboard"""
+    """AI Assistant for Building Analytics Dashboard - Powered by Google Gemini"""
     
     def __init__(self):
-        """Initialize the chatbot with OpenAI configuration"""
-        self.setup_openai()
+        """Initialize the chatbot with Google Gemini configuration"""
+        self.setup_gemini()
         self.initialize_session_state()
         
-    def setup_openai(self):
-        """Setup OpenAI configuration"""
+    def setup_gemini(self):
+        """Setup Google Gemini configuration"""
         try:
-            # Get API key from secrets or environment
+            if not GEMINI_AVAILABLE:
+                self.llm = None
+                self.pandas_agent = None
+                self.api_available = False
+                return
+                
+            # Get API key from secrets
             api_key = "demo-mode"  # Default fallback
             
             try:
-                if hasattr(st, 'secrets') and "openai" in st.secrets and "api_key" in st.secrets["openai"]:
-                    api_key = st.secrets["openai"]["api_key"]
+                if hasattr(st, 'secrets') and "gemini" in st.secrets and "api_key" in st.secrets["gemini"]:
+                    api_key = st.secrets["gemini"]["api_key"]
                     if api_key and api_key.strip() and api_key != "demo-mode":
-                        # Initialize LangChain models with real API key
-                        self.llm = ChatOpenAI(
+                        # Configure Gemini
+                        genai.configure(api_key=api_key)
+                        
+                        # Initialize LangChain with Gemini
+                        self.llm = ChatGoogleGenerativeAI(
+                            model="gemini-1.5-flash",
                             temperature=0.1,
-                            model_name="gpt-3.5-turbo",
-                            openai_api_key=api_key
+                            google_api_key=api_key
                         )
                         self.api_available = True
                     else:
@@ -118,7 +132,8 @@ class BuildingChatbot:
                 df,
                 verbose=True,
                 return_intermediate_steps=True,
-                handle_parsing_errors=True
+                handle_parsing_errors=True,
+                allow_dangerous_code=True
             )
             return self.pandas_agent
         except Exception as e:
@@ -414,15 +429,31 @@ I'm here to help you understand building performance analysis and machine learni
     def render_chat_interface(self, df: Optional[pd.DataFrame] = None):
         """Render the chat interface"""
         st.subheader("🤖 Building Analytics Assistant")
+        st.caption("Powered by Google Gemini 🚀")
+        
+        if not GEMINI_AVAILABLE:
+            st.error("❌ **Missing Dependencies**: Please install Google Gemini dependencies:")
+            st.code("pip install google-generativeai langchain-google-genai", language="bash")
+            st.info("After installation, restart the application.")
+            return
         
         if not self.api_available:
             st.info("💡 **Demo Mode**: The chatbot is running with limited functionality. To enable full AI capabilities:")
-            with st.expander("How to enable full AI functionality"):
+            with st.expander("How to enable FREE Google Gemini AI functionality"):
                 st.markdown("""
-                1. Get an OpenAI API key from [platform.openai.com](https://platform.openai.com/api-keys)
-                2. Edit the `.streamlit/secrets.toml` file in the app directory
-                3. Replace `api_key = "demo-mode"` with your actual API key
-                4. Restart the application
+                1. **Get a FREE Google Gemini API key** from [Google AI Studio](https://aistudio.google.com/app/apikey)
+                   - No credit card required!
+                   - Generous free tier with high rate limits
+                   
+                2. **Configure the API key**:
+                   - Edit the `.streamlit/secrets.toml` file in the app directory
+                   - Replace `api_key = "demo-mode"` with your actual API key:
+                   ```toml
+                   [gemini]
+                   api_key = "your-gemini-api-key-here"
+                   ```
+                   
+                3. **Restart the application**
                 
                 **Current capabilities in demo mode:**
                 - Basic explanations of ML models (PCA, TOPSIS, Mahalanobis, etc.)
@@ -430,7 +461,7 @@ I'm here to help you understand building performance analysis and machine learni
                 - Feature explanations
                 """)
         else:
-            st.success("🚀 **Full AI Mode**: Advanced chatbot functionality enabled!")
+            st.success("🚀 **Full AI Mode**: Advanced chatbot functionality enabled with Google Gemini!")
             
         # Dataset status
         if df is not None:

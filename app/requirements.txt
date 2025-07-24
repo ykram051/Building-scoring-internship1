@@ -49,12 +49,11 @@ pytest>=7.0.0
 black>=22.0.0
 flake8>=4.0.0
 
-# Chatbot and AI Assistant
-openai>=1.0.0
+# Chatbot and AI Assistant - Google Gemini (FREE)
+google-generativeai>=0.3.0
 langchain>=0.1.0
-langchain-openai>=0.1.0
+langchain-google-genai>=1.0.0
 langchain-experimental>=0.0.40
 pandasai>=1.5.0
-tiktoken>=0.5.0
 
 #pip install -r app/requirements.txt
