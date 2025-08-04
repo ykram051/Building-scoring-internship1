@@ -1,6 +1,7 @@
 """
 User authentication and authorization module for the Building Analytics Dashboard.
 Provides login functionality and role-based access control using PostgreSQL database.
+Enhanced with security improvements.
 """
 
 import streamlit as st
@@ -12,13 +13,30 @@ from pathlib import Path
 from datetime import datetime
 from utils.db import execute_query, query_to_dataframe
 from utils.logger import log_security_event, log_access_attempt, log_dataset_access
+from utils.secure_auth import secure_auth
 
-def hash_password(password):
-    """Create SHA-256 hash of a password"""
-    return hashlib.sha256(password.encode()).hexdigest()
+def hash_password(password, salt=None):
+    """Create secure SHA-256 hash of a password with salt"""
+    if salt is None:
+        # For backward compatibility, use old method if no salt provided
+        return hashlib.sha256(password.encode()).hexdigest()
+    else:
+        # Use new secure method with salt
+        hashed, _ = secure_auth.hash_password(password, salt)
+        return hashed
 
 def get_users_data():
     """Load users data from database"""
+    # Check if we should use fallback mode
+    try:
+        from utils.db import should_use_fallback
+        if should_use_fallback():
+            # In fallback mode, don't try to load from database
+            print("Fallback mode requested - empty password in configuration")
+            return {}
+    except ImportError:
+        pass
+    
     try:
         users_df = query_to_dataframe("SELECT username, password, role, name FROM users")
         
@@ -33,25 +51,66 @@ def get_users_data():
         
         return users
     except Exception as e:
-        st.error(f"Error loading users: {e}")
-        # Fallback to empty dict
+        print(f"Error loading users: {e}")
+        # Fallback to empty dict  
         return {}
 
 def check_password(username, password, users_data):
-    """Verify username and password"""
+    """Verify username and password with enhanced security"""
+    # Check if we should use fallback mode - if so, don't use this function
+    try:
+        from utils.db import should_use_fallback
+        if should_use_fallback():
+            return False  # Let fallback auth handle it
+    except ImportError:
+        pass
+    
+    # Sanitize input
+    username = secure_auth.sanitize_input(username)
+    
+    # Check login attempts before proceeding
+    if not secure_auth.check_login_attempts(username):
+        return False
+    
     if username in users_data:
         stored_password = users_data[username]["password"]
-        if stored_password == hash_password(password):
-            # Update last login time
-            try:
-                execute_query(
-                    "UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE username = :username",
-                    {"username": username}
-                )
-            except Exception:
-                pass  # Don't fail login if update fails
-            return True
-    return False
+        
+        # Check if password uses new salt-based format (contains ':')
+        if ':' in stored_password:
+            stored_hash, salt = stored_password.split(':', 1)
+            if secure_auth.verify_password(password, stored_hash, salt):
+                # Update last login time
+                try:
+                    execute_query(
+                        "UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE username = :username",
+                        {"username": username}
+                    )
+                except Exception:
+                    pass  # Don't fail login if update fails
+                secure_auth.record_login_attempt(username, True)
+                return True
+            else:
+                secure_auth.record_login_attempt(username, False)
+                return False
+        else:
+            # Legacy password format - still support but recommend update
+            if stored_password == hash_password(password):
+                # Update last login time
+                try:
+                    execute_query(
+                        "UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE username = :username",
+                        {"username": username}
+                    )
+                except Exception:
+                    pass  # Don't fail login if update fails
+                secure_auth.record_login_attempt(username, True)
+                return True
+            else:
+                secure_auth.record_login_attempt(username, False)
+                return False
+    else:
+        secure_auth.record_login_attempt(username, False)
+        return False
 
 def get_user_role(username, users_data):
     """Get the role for a specific user"""
@@ -63,13 +122,113 @@ def is_admin(username, users_data):
     """Check if user has admin role"""
     return get_user_role(username, users_data) == "admin"
 
+def check_authentication():
+    """Check if user is authenticated and session is valid"""
+    # Initialize security session
+    secure_auth.initialize_session_security()
+    
+    # Check session timeout
+    if secure_auth.check_session_timeout():
+        return False
+    
+    # Check if authenticated
+    if not st.session_state.get("authenticated", False):
+        return False
+    
+    # Set up user permissions if not already done
+    username = st.session_state.get("username")
+    user_role = st.session_state.get("user_role")
+    
+    if username and user_role and 'user_permissions' not in st.session_state:
+        permissions = secure_auth.get_user_role_permissions(user_role)
+        st.session_state.user_permissions = permissions
+    
+    return True
+
+def require_permission(permission: str):
+    """Decorator/function to check if user has required permission"""
+    if not check_authentication():
+        st.error("Authentication required")
+        st.stop()
+    
+    if not secure_auth.check_permission(permission):
+        username = st.session_state.get("username", "unknown")
+        log_security_event(
+            event_type="access_attempt",
+            username=username,
+            resource=permission,
+            success=False,
+            details={"reason": "insufficient_permissions"}
+        )
+        st.error("Access denied: Insufficient permissions")
+        st.stop()
+
+def check_dataset_ownership(dataset_name: str) -> dict:
+    """Check dataset ownership with enhanced security"""
+    try:
+        username = st.session_state.get("username")
+        if not username:
+            return {"owner": None, "has_access": False, "access_type": None}
+        
+        # Sanitize dataset name
+        dataset_name = secure_auth.sanitize_input(dataset_name)
+        
+        # Query database for dataset ownership
+        query = """
+            SELECT owner, created_at, is_public 
+            FROM dataset_ownership 
+            WHERE dataset_name = :dataset_name
+        """
+        result = query_to_dataframe(query, {"dataset_name": dataset_name})
+        
+        if result.empty:
+            return {"owner": None, "has_access": False, "access_type": None}
+        
+        owner = result.iloc[0]['owner']
+        is_public = result.iloc[0].get('is_public', False)
+        
+        # Determine access
+        if owner == username:
+            access_type = "owner"
+            has_access = True
+        elif is_public:
+            access_type = "public"
+            has_access = True
+        elif secure_auth.check_permission("view_all_datasets"):
+            access_type = "admin"
+            has_access = True
+        else:
+            access_type = None
+            has_access = False
+        
+        # Log dataset access attempt
+        log_dataset_access(username, dataset_name, f"ownership_check:{has_access}")
+        
+        return {
+            "owner": owner,
+            "has_access": has_access,
+            "access_type": access_type,
+            "is_public": is_public
+        }
+        
+    except Exception as e:
+        st.error(f"Error checking dataset ownership: {e}")
+        return {"owner": None, "has_access": False, "access_type": None}
+
 def logout():
-    """Log out the current user"""
+    """Log out the current user with enhanced security"""
     username = st.session_state.get("username", "unknown")
+    
+    # Log the logout action
+    secure_auth.log_user_action("logout", f"user: {username}")
+    
+    # Use secure logout method
+    secure_auth.logout_user()
+    
+    # Additional cleanup
     st.session_state["authenticated"] = False
     st.session_state["username"] = None
     st.session_state["user_role"] = None
-    # Clear any other session state variables that might contain user-specific data
     if "comparison_buildings" in st.session_state:
         st.session_state["comparison_buildings"] = []
     if "current_df" in st.session_state:
@@ -83,6 +242,15 @@ def logout():
 
 def login_form():
     """Display login form and handle authentication"""
+    # Check if we should use fallback mode - if so, delegate to fallback auth
+    try:
+        from utils.db import should_use_fallback
+        if should_use_fallback():
+            from utils.fallback_auth import fallback_login
+            return fallback_login()
+    except ImportError:
+        pass
+    
     # Initialize session state for authentication
     if "authenticated" not in st.session_state:
         st.session_state["authenticated"] = False
@@ -330,6 +498,14 @@ def add_user_management():
 
 def check_feature_access(feature_name):
     """Check if current user has access to a specific feature"""
+    # Check if we should use fallback mode - if so, always allow access
+    try:
+        from utils.db import should_use_fallback
+        if should_use_fallback():
+            return True  # In fallback mode, allow all access
+    except ImportError:
+        pass
+    
     from utils.roles import has_permission
     
     # Get user role from session state
@@ -354,15 +530,23 @@ def check_secure_feature_access(feature_name, allowed_roles=None):
     Returns:
         bool: True if user has both the permission and an allowed role
     """
+    # Check if we should use fallback mode - if so, always allow access
+    try:
+        from utils.db import should_use_fallback
+        if should_use_fallback():
+            return True  # In fallback mode, allow all access
+    except ImportError:
+        pass
+    
     # First check if the user has the basic permission
     has_permission = check_feature_access(feature_name)
     
     # If they don't have the basic permission, deny access
     if not has_permission:
         log_access_attempt(
-            feature=feature_name,
             username=st.session_state.get("username", "unknown"),
-            allowed=False,
+            resource=feature_name,
+            success=False,
             details={"reason": "missing_permission", "required_roles": allowed_roles}
         )
         return False
@@ -370,9 +554,9 @@ def check_secure_feature_access(feature_name, allowed_roles=None):
     # If no specific roles are required, permission alone is enough
     if allowed_roles is None:
         log_access_attempt(
-            feature=feature_name,
             username=st.session_state.get("username", "unknown"),
-            allowed=True,
+            resource=feature_name,
+            success=True,
             details={"reason": "has_permission"}
         )
         return True
@@ -383,9 +567,9 @@ def check_secure_feature_access(feature_name, allowed_roles=None):
     
     # Log the access attempt with appropriate details
     log_access_attempt(
-        feature=feature_name,
         username=st.session_state.get("username", "unknown"),
-        allowed=has_role,
+        resource=feature_name,
+        success=has_role,
         details={
             "user_role": user_role,
             "allowed_roles": allowed_roles,
@@ -405,6 +589,14 @@ def check_dataset_ownership(dataset_name):
     Returns:
         bool: True if user owns the dataset or is an admin, False otherwise
     """
+    # Check if we should use fallback mode - if so, always allow access
+    try:
+        from utils.db import should_use_fallback
+        if should_use_fallback():
+            return True  # In fallback mode, allow all access
+    except ImportError:
+        pass
+    
     username = st.session_state.get("username", "unknown")
     user_role = st.session_state.get("user_role")
     

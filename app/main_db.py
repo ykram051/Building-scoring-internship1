@@ -104,7 +104,7 @@ if 'db_modules_imported' not in st.session_state:
             except ImportError:
                 # Create stub functions if data processing fails
                 def process_city_data(city_name): return pd.DataFrame()
-                def get_available_cities(): return ["Demo City"]
+                def get_available_cities(username=None, user_role=None): return ["Demo City"]
                 def process_uploaded_data(file): return pd.DataFrame()
                 def process_city_with_years(city_name, years): return pd.DataFrame()
             
@@ -154,7 +154,7 @@ else:
             from data.data_processing import process_city_data, get_available_cities, process_uploaded_data, process_city_with_years
         except ImportError:
             def process_city_data(city_name): return pd.DataFrame()
-            def get_available_cities(): return ["Demo City"]
+            def get_available_cities(username=None, user_role=None): return ["Demo City"]
             def process_uploaded_data(file): return pd.DataFrame()
             def process_city_with_years(city_name, years): return pd.DataFrame()
     
@@ -288,6 +288,56 @@ def load_app_css():
     """Load CSS with caching to avoid repetitive loading."""
     from utils.css_loader import load_css
     load_css("styles.css")
+    
+    # Force dark theme with additional CSS
+    st.markdown("""
+    <style>
+    /* Force dark background on all elements */
+    .stApp, .main, .block-container {
+        background-color: #0e1117 !important;
+        color: #ffffff !important;
+    }
+    
+    /* Dark sidebar */
+    section[data-testid="stSidebar"] {
+        background-color: #262730 !important;
+    }
+    
+    /* Dark input fields */
+    .stTextInput > div > div > input, .stSelectbox > div > div {
+        background-color: #262730 !important;
+        color: #ffffff !important;
+        border-color: #444 !important;
+    }
+    
+    /* Dark buttons */
+    .stButton > button {
+        background-color: #FF4B4B !important;
+        color: #ffffff !important;
+        border: none !important;
+    }
+    
+    /* Dark tabs */
+    .stTabs [data-baseweb="tab-list"] {
+        background-color: #262730 !important;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        background-color: #262730 !important;
+        color: #ffffff !important;
+    }
+    
+    /* Dark metrics */
+    [data-testid="metric-container"] {
+        background-color: #262730 !important;
+        border: 1px solid #444 !important;
+        padding: 1rem !important;
+        border-radius: 0.5rem !important;
+        color: #ffffff !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
     return True
 
 # Load CSS
@@ -392,8 +442,8 @@ with st.sidebar:
     st.title("Dashboard Controls")
     st.header("📊 Dataset Selection")
     
-    # Get cities from the database
-    available_cities = get_available_cities()
+    # Get cities from the database with user filtering
+    available_cities = get_available_cities(username=username, user_role=user_role)
     upload_option = "Upload Custom Dataset"
     
     # Show all users' personal datasets
@@ -599,7 +649,7 @@ with st.sidebar:
                 st.success(f"Dataset '{city_name}' uploaded and processed successfully!")
                 
                 # Update the cities list without requiring a full page refresh
-                st.session_state.available_cities = get_available_cities()
+                st.session_state.available_cities = get_available_cities(username=username, user_role=user_role)
                     
                 print(f"Updated dataset ownership for: {city_name}")
                 
@@ -1660,7 +1710,7 @@ with tab_objects[tab_index]:
         # Get city list
         try:
             # Get all available cities
-            available_compare_cities = get_available_cities()
+            available_compare_cities = get_available_cities(username=username, user_role=user_role)
             if not available_compare_cities:
                 st.error("No cities available for comparison")
                 st.stop()

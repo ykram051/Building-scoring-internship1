@@ -418,9 +418,95 @@ def load_city_data_from_file(city_name):
         logger.error(f"Error loading city data from file: {e}")
         return None
 
-def get_available_cities():
+def get_available_cities(username=None, user_role=None):
     """
-    Get list of available cities from the database.
+    Get list of available cities for a specific user.
+    
+    Args:
+        username (str, optional): Username to filter datasets by. If None, returns all cities.
+        user_role (str, optional): User role ('admin', 'analyst', 'user'). Admins can see all datasets.
+    
+    Returns:
+        list: List of available city names for the user
+    """
+    # Admin users can see all datasets
+    if user_role == "admin":
+        return _get_all_cities()
+    
+    # Use a dictionary to track the preferred case version of each city
+    # Keys are lowercase city names, values are the preferred capitalized version
+    unique_cities = {}
+    found_sources = {}  # Track where each city was found to avoid duplicates
+    
+    # For regular users, only get cities from datasets they uploaded
+    if username:
+        try:
+            query = """
+            SELECT DISTINCT d.city 
+            FROM datasets d 
+            WHERE d.uploaded_by = :username 
+            ORDER BY d.city
+            """
+            df = query_to_dataframe(query, {"username": username})
+            if df is not None and not df.empty:
+                for city in df["city"].tolist():
+                    city_lower = city.lower()  # Normalize to lowercase for comparison
+                    unique_cities[city_lower] = city  # Use database casing as preferred
+                    found_sources[city_lower] = "database"
+        except Exception as e:
+            if logger.isEnabledFor(logging.DEBUG):  # Only log if debug is enabled
+                logger.error(f"Error getting user cities from database: {e}")
+
+        # For regular users, also check their user_datasets folder
+        possible_data_dirs = [
+            "data",
+            "app/data",
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+        ]
+        
+        for data_dir in possible_data_dirs:
+            if not os.path.exists(data_dir):
+                continue
+                
+            try:
+                # Check for uploaded datasets in user_datasets folder
+                user_datasets_dir = os.path.join(data_dir, "user_datasets")
+                if os.path.exists(user_datasets_dir):
+                    ownership_file = os.path.join(user_datasets_dir, "ownership.json")
+                    if os.path.exists(ownership_file):
+                        with open(ownership_file, "r") as f:
+                            try:
+                                ownership_data = json.load(f)
+                                # Only include cities owned by this user
+                                for city_name, owner_info in ownership_data.items():
+                                    if isinstance(owner_info, dict):
+                                        owner = owner_info.get("owner", owner_info.get("username"))
+                                    else:
+                                        owner = owner_info  # Legacy format
+                                    
+                                    if owner == username:
+                                        city_lower = city_name.lower()
+                                        if city_lower not in unique_cities:
+                                            unique_cities[city_lower] = city_name
+                                            found_sources[city_lower] = "ownership"
+                            except json.JSONDecodeError:
+                                if logger.isEnabledFor(logging.DEBUG):
+                                    logger.error("Error parsing user datasets ownership file")
+                    
+            except Exception as e:
+                if logger.isEnabledFor(logging.DEBUG):  # Only log if debug is enabled
+                    logger.error(f"Error scanning directory {data_dir}: {e}")
+    
+    # Return the values from our dictionary, which are the preferred capitalization of each city name
+    city_list = sorted(unique_cities.values())
+    
+    # If user has no cities, return empty list (they need to upload datasets)
+    return city_list
+
+
+def _get_all_cities():
+    """
+    Get list of all available cities from the database and file system (admin view).
     
     Returns:
         list: List of available city names
@@ -519,7 +605,7 @@ def get_available_cities():
         city_list = ["Lyon", "Paris", "Marseille", "Lille", "Bordeaux", "Strasbourg", 
                      "Nancy", "Toulouse", "Nice", "Rennes", "Auch"]
     
-    # Always ensure that Auch and Ciry_le_noble are available for testing
+    # Always ensure that Auch and Ciry_le_noble are available for testing (admin only)
     if "Auch" not in city_list and "auch" not in city_list:
         city_list.append("Auch")
     

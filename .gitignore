@@ -50,6 +50,44 @@ var/
 logs/
 *.log
 
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+
+# Test files
+test_*.py
+*_test.py
+validate_*.py
+
+# Documentation clutter
+*SUMMARY*.md
+*COMPLETION*.md
+*FINAL*.md
+*CLEANUP*.md
+WORKSPACE_CLEANED.md
+SECURITY_IMPLEMENTATION_COMPLETE.md
+LIGHTGBM_WARNINGS_FIXED.md
+
+# Model outputs
+outputs/temp_*
+models/temp_*
+
+# User uploaded datasets (keep organized)
+data/user_datasets/*.csv
+*.log
+
 # Cache
 app/cache/
 .cache/

@@ -1,12 +1,13 @@
 """
 Database connection and management module for PostgreSQL integration.
 Provides a centralized way to connect to the database and execute queries.
+Enhanced with security improvements and parameterized queries.
 """
 
 import os
 import logging
 import pandas as pd
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text, MetaData, Table, Column, Integer, String, DateTime, Boolean
 from sqlalchemy.exc import SQLAlchemyError
 import streamlit as st
 
@@ -21,19 +22,71 @@ except ImportError:
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-# Get database configuration from environment variables or use defaults
-DB_HOST = os.environ.get("DB_HOST", "localhost")
-DB_PORT = os.environ.get("DB_PORT", "5432")
-DB_NAME = os.environ.get("DB_NAME", "building_analytics")
-DB_USER = os.environ.get("DB_USER", "postgres")
-DB_PASSWORD = os.environ.get("DB_PASSWORD", "postgres")
+# Get database configuration from Streamlit secrets or environment variables
+def get_db_config():
+    """Get database configuration with fallback hierarchy"""
+    # Try Streamlit secrets first
+    if hasattr(st, 'secrets'):
+        # Check both 'database' and 'postgres' sections
+        if 'database' in st.secrets:
+            config = {
+                'host': st.secrets.database.get('host', 'localhost'),
+                'port': st.secrets.database.get('port', '5432'),
+                'name': st.secrets.database.get('database', 'building_analytics'),
+                'user': st.secrets.database.get('user', 'postgres'),
+                'password': st.secrets.database.get('password', None)  # Default to None for fallback
+            }
+        elif 'postgres' in st.secrets:
+            config = {
+                'host': st.secrets.postgres.get('host', 'localhost'),
+                'port': st.secrets.postgres.get('port', '5432'),
+                'name': st.secrets.postgres.get('dbname', 'building_analytics'),
+                'user': st.secrets.postgres.get('user', 'postgres'),
+                'password': st.secrets.postgres.get('password', None)  # Default to None for fallback
+            }
+        else:
+            # No database config found, use fallback
+            config = {'use_fallback': True}
+            return config
+            
+        # Check if password is missing, empty, or None - this indicates fallback mode
+        if config['password'] is None or config['password'] == "" or config['password'].strip() == "":
+            config['use_fallback'] = True
+        return config
+    
+    # Fallback to environment variables
+    config = {
+        'host': os.environ.get("DB_HOST", "localhost"),
+        'port': os.environ.get("DB_PORT", "5432"),
+        'name': os.environ.get("DB_NAME", "building_analytics"),
+        'user': os.environ.get("DB_USER", "postgres"),
+        'password': os.environ.get("DB_PASSWORD", None)  # Default to None
+    }
+    # Check if password is missing, empty, or None - this indicates fallback mode
+    if config['password'] is None or config['password'] == "" or config['password'].strip() == "":
+        config['use_fallback'] = True
+    return config
+
+def should_use_fallback():
+    """Check if we should use fallback mode instead of database"""
+    config = get_db_config()
+    return config.get('use_fallback', False)
 
 def get_connection_string():
-    """Get the database connection string."""
-    return f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+    """Get the database connection string with enhanced security."""
+    # Check if we should use fallback mode
+    if should_use_fallback():
+        raise Exception("Fallback mode requested - empty password in configuration")
+    
+    config = get_db_config()
+    return f"postgresql://{config['user']}:{config['password']}@{config['host']}:{config['port']}/{config['name']}"
 
 def get_db_engine():
     """Get a SQLAlchemy engine instance."""
+    # Check if we should use fallback mode
+    if should_use_fallback():
+        raise Exception("Fallback mode requested - empty password in configuration")
+    
     try:
         engine = create_engine(get_connection_string())
         return engine

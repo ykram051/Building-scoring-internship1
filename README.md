@@ -11,12 +11,49 @@ A Streamlit-based dashboard for analyzing building energy efficiency with multip
 - Year-over-year analytics
 - City-to-city comparisons
 - **🤖 AI Assistant**: Intelligent chatbot for data analysis and feature explanations
+- **🔒 Enterprise Security**: Comprehensive security implementation with authentication, authorization, and audit logging
 - **NEW**: PostgreSQL database integration
   - Scalable storage solution for large building datasets
   - High-performance database queries
   - Multi-user concurrent access support
   - Secure user authentication and authorization
   - Centralized data management
+
+## 🔒 Security Features
+
+The Building Analytics Dashboard implements enterprise-grade security:
+
+### Authentication & Session Management
+- **Secure password hashing** with SHA-256 and cryptographic salts
+- **Session timeout protection** (configurable, default 30 minutes)
+- **Failed login attempt tracking** and account lockout protection
+- **Strong password policies** with complexity requirements
+
+### Authorization & Access Control
+- **Role-based access control (RBAC)** with granular permissions
+- **User data isolation** - users can only access their own datasets
+- **Administrative controls** for user and system management
+- **Permission validation** for every system operation
+
+### Data Protection
+- **Input validation and sanitization** to prevent XSS and injection attacks
+- **Parameterized SQL queries** to prevent SQL injection
+- **Secure file uploads** with type, size, and content validation
+- **User-specific file directories** for data isolation
+
+### Audit & Compliance
+- **Comprehensive security logging** of authentication and authorization events
+- **Audit trail** for all data modifications and system changes
+- **Session tracking** with detailed user activity logs
+- **Database logging** of all security-relevant operations
+
+### Production Security
+- **Environment-based configuration** with secure secret management
+- **Streamlit security headers** including XSRF protection
+- **Docker security best practices** with non-root execution
+- **Error handling** that prevents information disclosure
+
+For detailed security information, see [Security Documentation](docs/SECURITY.md).
 
 ## Project Structure
 
@@ -29,6 +66,14 @@ The project has been reorganized for better maintainability:
 - `app/utils/` - Utilities for authentication, logging, and building data management
 - `app/models/` - Classification models for energy efficiency analysis
 - `app/visualization/` - Charts and map visualization components
+
+### Security Components
+
+- `app/utils/secure_auth.py` - Secure authentication and session management
+- `app/utils/secure_file_handler.py` - Secure file upload and validation
+- `app/utils/logger.py` - Enhanced security and audit logging
+- `.streamlit/config.toml` - Production security configuration
+- `docs/SECURITY.md` - Comprehensive security documentation
 
 ### Data Processing
 

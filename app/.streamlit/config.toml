@@ -1,0 +1,35 @@
+[global]
+# Production security settings
+dataFrameSerialization = "legacy"
+
+[server]
+# Security headers and settings
+enableCORS = false
+enableXsrfProtection = true
+maxUploadSize = 50
+allowRunOnSave = false
+
+[browser]
+# Disable some development features in production
+gatherUsageStats = false
+
+[logger]
+# Enhanced logging for security
+level = "info"
+messageFormat = "%(asctime)s %(message)s"
+
+[runner]
+# Security improvements
+magicEnabled = false
+installTracer = false
+
+[theme]
+# Optional: Set consistent theme
+primaryColor = "#FF6B6B"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F0F2F6"
+textColor = "#030304ff"
+
+[client]
+# Security headers
+showErrorDetails = false

@@ -25,12 +25,40 @@ class SimpleDBManager:
             return True
             
         try:
-            # Get database configuration from environment variables
-            db_host = os.environ.get("DB_HOST", "localhost")
-            db_port = os.environ.get("DB_PORT", "5432")
-            db_name = os.environ.get("DB_NAME", "building_analytics")
-            db_user = os.environ.get("DB_USER", "postgres")
-            db_password = os.environ.get("DB_PASSWORD", "root")
+            # Check if we should use fallback mode
+            from utils.db import should_use_fallback
+            if should_use_fallback():
+                logger.info("Fallback mode requested - skipping database initialization")
+                return False
+            
+            # Try to get configuration from Streamlit secrets first
+            try:
+                import streamlit as st
+                if hasattr(st, 'secrets') and 'database' in st.secrets:
+                    db_host = st.secrets.database.get('host', 'localhost')
+                    db_port = st.secrets.database.get('port', '5432')
+                    db_name = st.secrets.database.get('database', 'building_analytics')
+                    db_user = st.secrets.database.get('user', 'postgres')
+                    db_password = st.secrets.database.get('password', None)
+                    
+                    # Check for fallback mode conditions
+                    if db_password is None or str(db_password).strip() == "":
+                        logger.info("Empty or missing password in secrets - using fallback mode")
+                        return False
+                else:
+                    raise ImportError("No Streamlit secrets found")
+            except (ImportError, AttributeError):
+                # Fallback to environment variables
+                db_host = os.environ.get("DB_HOST", "localhost")
+                db_port = os.environ.get("DB_PORT", "5432")
+                db_name = os.environ.get("DB_NAME", "building_analytics")
+                db_user = os.environ.get("DB_USER", "postgres")
+                db_password = os.environ.get("DB_PASSWORD", None)
+            
+            # Additional check for empty password (fallback trigger)
+            if not db_password or str(db_password).strip() == "":
+                logger.info("Empty password detected - using fallback mode")
+                return False
             
             # Create connection string directly
             conn_string = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
