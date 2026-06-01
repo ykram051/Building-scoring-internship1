@@ -7,6 +7,7 @@ import json
 import os
 import time
 import warnings
+from pathlib import Path
 
 # Configure logging to reduce verbosity
 logging.basicConfig(level=logging.WARNING, 
@@ -18,6 +19,58 @@ logging.getLogger('data.data_processing').setLevel(logging.WARNING)
 logging.getLogger('lightgbm').setLevel(logging.ERROR)
 warnings.filterwarnings('ignore', category=UserWarning, module='lightgbm')
 warnings.filterwarnings('ignore', message='.*No further splits with positive gain.*')
+
+# Helper function to record dataset ownership
+def record_dataset_ownership(city_name, username, processing_type="standard_processing"):
+    """
+    Record dataset ownership in the ownership.json file.
+    
+    Args:
+        city_name (str): Name of the dataset
+        username (str): Username of the owner
+        processing_type (str): Type of processing used ("flexible", "standard_processing")
+    """
+    try:
+        # Determine the correct path for the data directory
+        # Handle both direct execution and module import cases
+        try:
+            current_dir = Path(__file__).parent
+            data_dir = current_dir.parent / "data"
+        except NameError:
+            # Fallback if __file__ is not available
+            data_dir = Path("../data") if Path("../data").exists() else Path("data")
+        
+        # Ensure directories exist
+        data_dir.mkdir(parents=True, exist_ok=True)
+        (data_dir / "user_datasets").mkdir(parents=True, exist_ok=True)
+        
+        # Track dataset ownership
+        user_datasets_file = data_dir / "user_datasets" / "ownership.json"
+        try:
+            with open(user_datasets_file, "r") as f:
+                dataset_ownership = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            dataset_ownership = {}
+        
+        # Add current dataset to ownership tracking
+        dataset_ownership[city_name] = {
+            "owner": username,
+            "uploaded_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "processed_with": processing_type
+        }
+        
+        # Save updated ownership information
+        with open(user_datasets_file, "w") as f:
+            json.dump(dataset_ownership, f, indent=2)
+            
+        # Update session state if available
+        if 'st' in globals() and hasattr(st, 'session_state'):
+            st.session_state["dataset_ownership"] = dataset_ownership
+        
+        return True
+    except Exception as e:
+        logging.error(f"Failed to record dataset ownership: {e}")
+        return False
 # Import DB manager and initialize database connection (cached to avoid repetition)
 @st.cache_resource
 def get_database_manager():
@@ -75,7 +128,7 @@ if 'db_modules_imported' not in st.session_state:
             )
             
             from utils.building_editor import display_building_editor, display_edit_history, save_building_changes
-            from utils.logger import log_security_event, log_dataset_access, log_data_change
+            from utils.logger import log_security_event, log_dataset_access, log_data_change, log_audit_event
             
             auth_mode = "database"
             
@@ -86,14 +139,40 @@ if 'db_modules_imported' not in st.session_state:
                 is_authenticated, get_current_user, is_admin, fallback_logout as logout
             )
             
-            # Stub functions for database-specific features
+            # Stub functions for database-specific features with security
             def check_feature_access(feature_name): return True
             def check_secure_feature_access(feature_name): return True
-            def check_dataset_ownership(dataset_name): return True
+            def check_dataset_ownership(dataset_name): 
+                """Secure fallback that still requires authentication"""
+                if not st.session_state.get("authenticated", False):
+                    return False
+                username = st.session_state.get("username", "")
+                user_role = st.session_state.get("user_role", "user")
+                
+                # Admin can access all datasets
+                if user_role == "admin":
+                    return True
+                
+                # Check ownership.json for user datasets
+                try:
+                    data_dir = Path("data")
+                    ownership_file = data_dir / "user_datasets" / "ownership.json"
+                    if ownership_file.exists():
+                        with open(ownership_file, "r") as f:
+                            ownership_data = json.load(f)
+                        dataset_info = ownership_data.get(dataset_name, {})
+                        if isinstance(dataset_info, dict):
+                            return dataset_info.get("owner") == username
+                        else:
+                            return dataset_info == username  # Legacy format
+                except Exception:
+                    pass
+                return False
             def add_user_management(): st.info("User management requires database connection.")
             def log_security_event(event, details): pass
             def log_dataset_access(dataset_name, username): pass
             def log_data_change(details): pass
+            def log_audit_event(event_type, username, resource, action, old_value=None, new_value=None, details=None): pass
             def display_building_editor(): st.info("Building editor requires database connection.")
             def display_edit_history(): st.info("Edit history requires database connection.")
             def save_building_changes(changes): return False
@@ -138,10 +217,35 @@ else:
             is_authenticated, get_current_user, is_admin, fallback_logout as logout
         )
         
-        # Recreate stub functions
+        # Recreate stub functions with security
         def check_feature_access(feature_name): return True
         def check_secure_feature_access(feature_name): return True
-        def check_dataset_ownership(dataset_name): return True
+        def check_dataset_ownership(dataset_name): 
+            """Secure fallback that still requires authentication"""
+            if not st.session_state.get("authenticated", False):
+                return False
+            username = st.session_state.get("username", "")
+            user_role = st.session_state.get("user_role", "user")
+            
+            # Admin can access all datasets
+            if user_role == "admin":
+                return True
+            
+            # Check ownership.json for user datasets
+            try:
+                data_dir = Path("data")
+                ownership_file = data_dir / "user_datasets" / "ownership.json"
+                if ownership_file.exists():
+                    with open(ownership_file, "r") as f:
+                        ownership_data = json.load(f)
+                    dataset_info = ownership_data.get(dataset_name, {})
+                    if isinstance(dataset_info, dict):
+                        return dataset_info.get("owner") == username
+                    else:
+                        return dataset_info == username  # Legacy format
+            except Exception:
+                pass
+            return False
         def add_user_management(): st.info("User management requires database connection.")
         def log_security_event(event, details): pass
         def log_dataset_access(dataset_name, username): pass
@@ -180,21 +284,79 @@ for path in [str(parent_dir), str(scripts_dir)]:
         sys.path.insert(0, path)
 
 try:
-    from scripts.validate_data import add_classifications, validate_and_preprocess_dataset, ensure_classifications
+    from scripts.validate_data import add_classifications
     from scripts.compute_feature_ranges import compute_ranges
     scripts_imported = True
 except ImportError as e:
     print(f"Warning: Could not import scripts: {e}")
     # Define fallback functions
     def add_classifications(df, features, weights=None):
-        return df
-    def validate_and_preprocess_dataset(df, scoring_basis):
-        return df
-    def ensure_classifications(df, features, weights=None):
+        """Fallback function that adds basic classification columns"""
+        if df is None or df.empty:
+            return df
+        
+        # Check if classification columns already exist
+        class_columns = ['class_pca', 'class_cosine', 'class_mahalanobis', 'class_weighted', 'class_tree', 'class_topsis']
+        missing_classes = [col for col in class_columns if col not in df.columns]
+        
+        if missing_classes:
+            print(f"Adding missing classification columns: {missing_classes}")
+            # Add default classification columns with 'C' values
+            for col in missing_classes:
+                df[col] = 'C'
+        
         return df
     def compute_ranges(df):
         return {}
     scripts_imported = False
+
+# Define local validation functions (used regardless of script import)
+def validate_and_preprocess_dataset(df, scoring_basis, silent=False):
+    """Validate and preprocess dataset to ensure required columns exist"""
+    if df is None or df.empty:
+        if silent:
+            print("Empty dataframe provided for validation")
+        else:
+            st.warning("Empty dataframe provided for validation")
+        return None
+        
+    # Check for required columns based on scoring basis
+    required_columns = []
+    if scoring_basis == "energy":
+        required_columns = ["Energy_Consumption"]
+    elif scoring_basis == "co2":
+        required_columns = ["CO2_Usage"]  
+    elif scoring_basis == "water":
+        required_columns = ["Water_Usage"]
+    elif scoring_basis == "multi":
+        required_columns = ["Energy_Consumption", "CO2_Usage"]
+    
+    # Check if required columns exist
+    missing_columns = [col for col in required_columns if col not in df.columns]
+    if missing_columns:
+        if silent:
+            print(f"Missing required columns: {missing_columns}")
+            print(f"Available columns: {list(df.columns)}")
+        else:
+            st.error(f"Missing required columns: {missing_columns}")
+            st.error(f"Available columns: {list(df.columns)}")
+        return None
+    
+    return df
+
+def ensure_classifications(df, features, weights=None):
+    """Ensure dataframe has necessary features and can be classified"""
+    if df is None or df.empty:
+        st.warning("Empty dataframe, cannot add classifications")
+        return df
+        
+    # Check if required features exist
+    missing_features = [f for f in features if f not in df.columns]
+    if missing_features:
+        st.warning(f"Missing features for classification: {missing_features}")
+        return df
+        
+    return df
 from visualization.map import display_map
 from visualization.charts import display_relationship_plot, display_distribution_plot
 from visualization.model_specific import display_model_visualization
@@ -344,31 +506,70 @@ def load_app_css():
 load_app_css()
 
 # Authentication system (only show login if not already authenticated)
+def _validate_session_integrity():
+    """Validate session integrity with multiple checks"""
+    if not st.session_state.get("authenticated", False):
+        return False
+    
+    username = st.session_state.get("username")
+    if not username or username in ["", "unknown"]:
+        return False
+    
+    # Check for required session components
+    required_keys = ["authenticated", "username", "user_role"]
+    for key in required_keys:
+        if key not in st.session_state:
+            return False
+    
+    # Check session timeout if available (commented out for debugging)
+    # try:
+    #     from utils.secure_auth import secure_auth
+    #     if hasattr(secure_auth, 'check_session_timeout'):
+    #         if secure_auth.check_session_timeout():
+    #             return False
+    # except ImportError:
+    #     pass
+    
+    return True
+
+def _clear_session_safely():
+    """Safely clear session with proper cleanup"""
+    sensitive_keys = [
+        'authenticated', 'username', 'user_role', 'user_permissions',
+        'session_start_time', 'chatbot_messages', 'chatbot_dataset',
+        'dataset_ownership', 'available_cities'
+    ]
+    
+    for key in sensitive_keys:
+        if key in st.session_state:
+            del st.session_state[key]
+    
+    st.session_state.authenticated = False
+
 auth_mode = st.session_state.get('auth_mode', 'fallback')
 
 if auth_mode == "fallback":
     # Use fallback authentication
     if not st.session_state.get("authenticated", False):
         if not login_form():
-            # If not authenticated, show only login form and stop execution
             st.stop()
-    else:
-        # User is already authenticated, just validate session
-        if "username" not in st.session_state or not st.session_state.get("username"):
-            # Session seems corrupted, reset
-            st.session_state.authenticated = False
+    # Only clear session if all required keys are missing, not just on any rerun
+    elif not _validate_session_integrity():
+        missing_keys = [k for k in ["authenticated", "username", "user_role"] if k not in st.session_state]
+        if len(missing_keys) == 3:
+            # Only clear if all keys are missing (true session reset)
+            _clear_session_safely()
             st.rerun()
+        # Otherwise, keep session alive
 else:
     # Use database authentication
     if not st.session_state.get("authenticated", False):
         if not login_form():
-            # If not authenticated, show only login form and stop execution
             st.stop()
-    else:
-        # User is already authenticated, just validate session
-        if "username" not in st.session_state or not st.session_state.get("username"):
-            # Session seems corrupted, reset
-            st.session_state.authenticated = False
+    elif not _validate_session_integrity():
+        missing_keys = [k for k in ["authenticated", "username", "user_role"] if k not in st.session_state]
+        if len(missing_keys) == 3:
+            _clear_session_safely()
             st.rerun()
 
 # Display user info and admin badge
@@ -505,8 +706,17 @@ with st.sidebar:
         # 1. Admin can delete any non-protected dataset
         # 2. Regular users can delete their own datasets
         is_admin = st.session_state.get("user_role") == "admin"
-        is_owner = dataset_option in dataset_ownership and dataset_ownership[dataset_option].get("owner") == st.session_state.get("username")
+        current_user = st.session_state.get("username")
         is_protected = dataset_option.lower() in protected_datasets
+        
+        # For fallback mode, allow users to delete datasets they uploaded
+        # Check ownership more broadly - either from dataset_ownership or if it's not a built-in dataset
+        is_owner = False
+        if dataset_option in dataset_ownership:
+            is_owner = dataset_ownership[dataset_option].get("owner") == current_user
+        else:
+            # If not in ownership records and not a built-in dataset, assume user can delete
+            is_owner = not is_protected
         
         # Show delete button if the user is admin or owner, and the dataset isn't protected
         if (is_admin or is_owner) and not is_protected:
@@ -519,31 +729,45 @@ with st.sidebar:
                                          type="secondary")
                 
                 if delete_button:
-                    # Ask for confirmation first
-                    st.warning(f"Are you sure you want to permanently delete '{dataset_option}'? This cannot be undone.")
-                    confirm_col1, confirm_col2 = st.columns([1, 1])
-                    with confirm_col1:
-                        if st.button("✓ Yes, delete it", key=f"confirm_delete_{dataset_option}", type="primary"):
+                    # Immediate deletion without nested confirmation
+                    try:
+                        # Import delete_dataset function
+                        from data.data_processing import delete_dataset
+                        
+                        # Delete the dataset
+                        success, message = delete_dataset(dataset_option, st.session_state.get("username"))
+                        
+                        if success:
+                            st.success(f"✅ Successfully deleted dataset: {dataset_option}")
+                            # Audit log for dataset deletion (only if database mode)
                             try:
-                                # Import delete_dataset function
-                                from data.data_processing import delete_dataset
-                                
-                                # Delete the dataset
-                                success, message = delete_dataset(dataset_option, st.session_state.get("username"))
-                                
-                                if success:
-                                    st.success(f"Successfully deleted dataset: {dataset_option}")
-                                    
-                                    # Refresh the page to update the dataset list
-                                    time.sleep(1)  # Short delay for the success message to be visible
-                                    st.rerun()
-                                else:
-                                    st.error(f"Error deleting dataset: {message}")
-                            except Exception as e:
-                                st.error(f"Error: {str(e)}")
-                    with confirm_col2:
-                        if st.button("✗ Cancel", key=f"cancel_delete_{dataset_option}"):
-                            st.info("Deletion cancelled")
+                                log_audit_event(
+                                    event_type="file_delete",
+                                    username=st.session_state.get("username", "unknown"),
+                                    resource=dataset_option,
+                                    action="delete",
+                                    old_value="exists",
+                                    new_value="deleted",
+                                    details={}
+                                )
+                            except NameError:
+                                # log_audit_event not available in fallback mode
+                                pass
+                            
+                            # Clear cache and update available cities
+                            st.cache_data.clear()
+                            if 'available_cities' in st.session_state:
+                                st.session_state.available_cities = get_available_cities(username=username, user_role=user_role)
+                            
+                            # Force refresh
+                            st.rerun()
+                        else:
+                            st.error(f"❌ Error deleting dataset: {message}")
+                    except Exception as e:
+                        st.error(f"❌ Error: {str(e)}")
+                        print(f"Delete error: {e}")
+                        import traceback
+                        traceback.print_exc()
 
     # Initialize variables
     df = None
@@ -552,9 +776,9 @@ with st.sidebar:
 
     # ── 2) Handle upload branch ──
     if dataset_option == "Upload Custom Dataset":
-        # Check upload permission
-        if not check_secure_feature_access("upload_custom_dataset", allowed_roles=["admin", "user", "analyst"]):
-            st.warning("You need appropriate privileges to upload custom datasets")
+        # Check upload permission - now accessible to all authenticated users with permission
+        if not check_feature_access("upload_custom_dataset"):
+            st.warning("You need to be logged in to upload custom datasets")
             st.stop()
             
         is_custom_data = True
@@ -593,10 +817,72 @@ with st.sidebar:
             st.warning("Please provide a name for your dataset.")
             st.stop()
 
-        # Process the uploaded dataset using the unified pipeline from DataPreprocessing.ipynb
+        # Process the uploaded dataset using secure file handling
         with st.spinner(f"Processing dataset for {city_name}..."):
             try:
-                # Always use the process_uploaded_data function from data_processing.py
+                # Import secure file handler
+                from utils.secure_file_handler import secure_file_handler
+                
+                # Get current user info
+                current_username = st.session_state.get("username", "admin")
+                
+                # Validate user authentication
+                if not _validate_session_integrity():
+                    st.error("Session expired. Please log in again.")
+                    st.stop()
+                
+                # Use secure file upload
+                success, message, file_info = secure_file_handler.secure_file_upload(
+                    uploaded_file=uploaded_file,
+                    user_id=current_username,
+                    dataset_name=city_name
+                )
+                
+                if success and file_info:
+                    st.success(f"✅ Dataset uploaded securely: {message}")
+                    
+                    # Record dataset ownership in the secure user directory
+                    record_dataset_ownership(
+                        city_name=city_name, 
+                        username=current_username,
+                        processing_type="secure_upload"
+                    )
+                    
+                    # Log successful secure upload (only if database mode)
+                    try:
+                        log_audit_event(
+                            event_type="secure_dataset_upload",
+                            username=current_username,
+                            resource=city_name,
+                            action="upload",
+                            new_value=f"file_path:{file_info.get('path')}",
+                            details={
+                                "filename": file_info.get('filename'),
+                                "size": file_info.get('size'),
+                                "validation": file_info.get('validation', {})
+                            }
+                        )
+                    except NameError:
+                        # log_audit_event not available in fallback mode
+                        pass
+                    
+                    # Update available cities
+                    st.session_state.available_cities = get_available_cities(username=username, user_role=user_role)
+                    
+                    st.info("� Your dataset has been securely uploaded with user isolation!")
+                    time.sleep(2)
+                    st.rerun()
+                else:
+                    st.error(f"Secure upload failed: {message}")
+                    st.info("🔄 Falling back to legacy processing...")
+                    
+            except ImportError:
+                st.warning("Secure file handler not available, using legacy processing")
+            except Exception as e:
+                st.error(f"Secure upload error: {str(e)}")
+                st.info("🔄 Falling back to legacy processing...")
+                    
+                    # Always use the process_uploaded_data function from data_processing.py
                 from data.data_processing import process_uploaded_data
                 
                 # We're only using the standard processing now
@@ -622,39 +908,31 @@ with st.sidebar:
                 # Make sure city_name is consistent
                 city_name = processed_city_name or city_name
                 
-                # Update dataset ownership record
-                data_dir.mkdir(parents=True, exist_ok=True)
-                (data_dir / "user_datasets").mkdir(parents=True, exist_ok=True)
-                
-                # Track dataset ownership
-                user_datasets_file = data_dir / "user_datasets" / "ownership.json"
-                try:
-                    with open(user_datasets_file, "r") as f:
-                        dataset_ownership = json.load(f)
-                except (FileNotFoundError, json.JSONDecodeError):
-                    dataset_ownership = {}
-                
-                # Add current dataset to ownership tracking
-                dataset_ownership[city_name] = {
-                    "owner": st.session_state.get("username", "admin"),
-                    "uploaded_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "processed_with": "unified_pipeline" if using_unified_pipeline else "standard_processing"
-                }
-                
-                # Save updated ownership information
-                with open(user_datasets_file, "w") as f:
-                    json.dump(dataset_ownership, f)
+                # Record dataset ownership using helper function
+                record_dataset_ownership(
+                    city_name=city_name, 
+                    username=st.session_state.get("username", "admin"),
+                    processing_type="standard_processing"
+                )
                     
                 # Show success message
                 st.success(f"Dataset '{city_name}' uploaded and processed successfully!")
+                # Audit log for dataset upload (only if database mode)
+                try:
+                    log_audit_event(
+                        event_type="file_upload",
+                        username=st.session_state.get("username", "unknown"),
+                        resource=city_name,
+                        action="upload",
+                        new_value="uploaded",
+                        details={"filename": uploaded_file.name}
+                    )
+                except NameError:
+                    # log_audit_event not available in fallback mode
+                    pass
                 
                 # Update the cities list without requiring a full page refresh
                 st.session_state.available_cities = get_available_cities(username=username, user_role=user_role)
-                    
-                print(f"Updated dataset ownership for: {city_name}")
-                
-                # Update session state
-                st.session_state["dataset_ownership"] = dataset_ownership
                 
                 # Use the full processed dataset
                 df = city_data
@@ -994,7 +1272,7 @@ base_tabs = [
     "City Statistics",
     "Year-over-Year Comparison",
     "Compare Cities",
-    "🤖 AI Assistant"  # New chatbot tab
+    "🤖 AI Assistant",  # Chatbot tab
 ]
 
 # Define restricted tabs
@@ -1005,16 +1283,12 @@ is_user_dataset = check_dataset_ownership(selected_city)
 # For backward compatibility with existing code
 dataset_owner = st.session_state["dataset_ownership"].get(selected_city, {}).get("owner") if st.session_state.get("dataset_ownership") else None
 
-# Add Building Data tab only if:
-# 1. User has admin/analyst permission through role OR
-# 2. It's their own uploaded dataset AND they have edit_own_dataset permission
-if check_secure_feature_access("view_building_data_tab", allowed_roles=["admin", "analyst"]) or (is_user_dataset and check_feature_access("edit_own_dataset")):
+# Add Building Data tab - now accessible to all authenticated users
+if check_feature_access("view_building_data_tab"):
     tabs.insert(2, "Building Data")  # Insert after Analytics & Insights
     
-# Add Export & Reports tab only if:
-# 1. User has admin/analyst permission through role OR
-# 2. It's their own uploaded dataset AND they have export_own_data permission
-if check_secure_feature_access("view_export_reports_tab", allowed_roles=["admin", "analyst"]) or (is_user_dataset and check_feature_access("export_own_data")):
+# Add Export & Reports tab - now accessible to all authenticated users
+if check_feature_access("view_export_reports_tab"):
     tabs.insert(3 if "Building Data" in tabs else 2, "Export & Reports")
     
 # Add Admin tab only for admin users
@@ -1244,9 +1518,8 @@ if "Building Data" in tabs:
         # For backward compatibility with existing code
         dataset_owner = st.session_state["dataset_ownership"].get(selected_city, {}).get("owner") if st.session_state.get("dataset_ownership") else None
         
-        # More clearly show editing options for user's own datasets
-        # Regular users should ONLY be able to edit their own uploaded datasets
-        can_edit = (check_secure_feature_access("change_building_data", allowed_roles=["admin"]) or 
+        # Users can edit their own datasets, managers and admins can edit any dataset
+        can_edit = (check_feature_access("change_building_data") or 
                    (is_owner and check_feature_access("edit_own_dataset")))
         
         if can_edit:
@@ -1288,6 +1561,15 @@ if "Building Data" in tabs:
                     if st.button("Save all changes to file"):
                         # In DB mode, we save to database
                         save_building_changes(df, selected_city)
+                        # Audit log for building data edit
+                        log_audit_event(
+                            event_type="building_edit",
+                            username=st.session_state.get("username", "unknown"),
+                            resource=selected_city,
+                            action="edit",
+                            new_value="building_data_edited",
+                            details={"building_id": edit_building_id}
+                        )
                         
             # Display edit history
             with st.expander("View Edit History", expanded=False):
@@ -1316,9 +1598,8 @@ if "Export & Reports" in tabs:
         # For backward compatibility with existing code
         dataset_owner = st.session_state["dataset_ownership"].get(selected_city, {}).get("owner") if st.session_state.get("dataset_ownership") else None
         
-        # Regular users should ONLY be able to export their own uploaded datasets
-        can_export = (check_secure_feature_access("export_data", allowed_roles=["admin", "analyst"]) or
-                     (is_owner and check_feature_access("export_own_data")))
+        # All authenticated users can now export data
+        can_export = check_feature_access("export_data")
         
         if can_export:
             export_col1, export_col2 = st.columns(2)
@@ -1374,6 +1655,19 @@ with tab_objects[tab_index]:
     import plotly.express as px
 
     st.header("📊 City Statistics by Feature & Class")
+
+    # Ensure the dataframe has classification columns
+    df = st.session_state["df"]
+    class_columns = ['class_pca', 'class_cosine', 'class_mahalanobis', 'class_weighted', 'class_tree', 'class_topsis']
+    missing_classes = [col for col in class_columns if col not in df.columns]
+    
+    if missing_classes:
+        st.info(f"Adding missing classification columns: {missing_classes}")
+        # Add default classification columns with 'C' values
+        for col in missing_classes:
+            df[col] = 'C'
+        # Update session state
+        st.session_state["df"] = df
 
     # 1) Pick method & class
     methods = {
@@ -1644,49 +1938,77 @@ with tab_objects[tab_index]:
     if st.checkbox(f"Show detailed data for {title_map[key].lower()} {selected_metric}"):
         st.dataframe(values_df.style.format("{:,.2f}"), use_container_width=True)
 
-# Compare Cities tab (always listed but may be restricted)
+# Compare Cities tab - now accessible to all authenticated users
 with tab_objects[tab_index]:
     tab_index += 1
-    if check_secure_feature_access("city_comparison", allowed_roles=["admin"]):
+    if check_feature_access("city_comparison"):
         from datetime import datetime
 
         # — Helper to load & classify (no hashing on method_fn) —
         @st.cache_data(show_spinner=False)
         def load_and_prepare(city_name, year, features, weights, _method_fn, col_name, sel_class, scoring_basis):
-            # Always assume DB mode in main_db.py
+            # Load data with better error handling and year filtering
+            df = None
+            
             try:
-                # DB mode
-                df = process_city_data(city_name, input_source="db", year=year)
+                # First try CSV source (most reliable for city comparison)
+                print(f"Loading data for {city_name}...")
+                df = process_city_data(city_name, input_source="csv")
+                
+                # If CSV fails, try DB with year filter
                 if df is None:
-                    # Try fallback to file
-                    st.info(f"Falling back to file-based data for {city_name}")
-                    df = process_city_data(city_name)
+                    print(f"CSV failed for {city_name}, trying database with year {year}...")
+                    df = process_city_data(city_name, input_source="db", year=year)
+                    
+                # If still None, try DB without year filter
+                if df is None:
+                    print(f"DB with year failed for {city_name}, trying without year filter...")
+                    df = process_city_data(city_name, input_source="db")
+                    
             except Exception as e:
-                st.error(f"Error loading data for {city_name}: {e}")
-                return pd.DataFrame()  # Empty dataframe
+                print(f"Error loading data for {city_name}: {e}")
             
             # Check if data was loaded successfully
-            if df is None:
-                st.warning(f"Could not load data for {city_name} (year {year})")
+            if df is None or df.empty:
+                print(f"Could not load any data for {city_name}")
                 return pd.DataFrame()  # Return empty dataframe
+            
+            # Apply year filtering if we have year data and year is specified
+            if year is not None and 'year' in df.columns:
+                year_filtered = df[df['year'] == year]
+                if not year_filtered.empty:
+                    df = year_filtered
+                    print(f"Applied year filter {year} for {city_name}: {len(df)} rows")
+                else:
+                    print(f"No data found for {city_name} in year {year}, using all available data")
                     
             # Validate and preprocess the data
-            df = validate_and_preprocess_dataset(df, scoring_basis)
-            if df is None:
-                st.warning(f"Data validation failed for {city_name} (year {year})")
+            validated_df = validate_and_preprocess_dataset(df, scoring_basis, silent=True)
+            if validated_df is None:
+                print(f"Data validation failed for {city_name} (year {year})")
                 return pd.DataFrame()  # Return empty dataframe
-                
+            
+            df = validated_df
             df = ensure_classifications(df, features, weights)
             
             # Apply classification method
             try:
                 df = _method_fn(df)
                 df["class_label"] = df[col_name]
+                
+                # Apply class filter if specified
                 if sel_class != "All":
-                    df = df[df["class_label"] == sel_class]
+                    class_filtered = df[df["class_label"] == sel_class]
+                    if not class_filtered.empty:
+                        df = class_filtered
+                    else:
+                        print(f"No data found for {city_name} with class {sel_class}")
+                        
+                print(f"Successfully prepared {len(df)} rows for {city_name}")
                 return df
+                
             except Exception as e:
-                st.error(f"Error applying classification to {city_name}: {e}")
+                print(f"Error applying classification to {city_name}: {e}")
                 return pd.DataFrame()  # Return empty dataframe
 
         # — Controls —
@@ -1748,6 +2070,9 @@ with tab_objects[tab_index]:
         sel_method = st.selectbox("Classification Method", list(methods.keys()))
         method_fn  = methods[sel_method]
         col_name   = cols_map[sel_method]
+
+        # Define scoring basis for city comparison (focusing on multi-criteria)
+        scoring_basis = "multi"  # Use Energy_Consumption and CO2_Usage
 
         # — Load & prepare each city's data —
         city_dfs = {}
@@ -2056,11 +2381,6 @@ if "🤖 AI Assistant" in tabs:
             st.error(f"Error loading chatbot: {str(e)}")
             st.info("The AI Assistant requires an OpenAI API key. Please configure it in your secrets.toml file.")
 
-st.markdown("""
-    <div style="text-align: center; margin-top: 30px; padding: 10px; background-color: #f8f9fa; border-radius: 5px;">
-        <p style="margin: 0; color: #1a1a1a;">Building Analytics Dashboard • Created with ❤️ • Data updated: Mai 2025</p>
-    </div>
-""", unsafe_allow_html=True)
 
 # Registration system
 if 'register' not in st.session_state:
@@ -2081,6 +2401,15 @@ if st.session_state['register']:
                 success = register_user(username, password)
                 if success:
                     st.success("Registration successful! Please log in.")
+                    # Audit log for user registration
+                    log_audit_event(
+                        event_type="user_registration",
+                        username=username,
+                        resource="user_account",
+                        action="register",
+                        new_value="registered",
+                        details={}
+                    )
                     st.session_state['register'] = False
                 else:
                     st.error("Registration failed. Username might already exist.")

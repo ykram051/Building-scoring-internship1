@@ -27,30 +27,36 @@ ROLES = {
             "upload_custom_dataset",
             "edit_own_dataset",
             "export_own_data",
+            "export_data",
             "generate_report",
             "view_building_data_tab",
-            "view_export_reports_tab"
+            "view_export_reports_tab",
+            "city_comparison"
         ]
     },
     "analyst": {
         "description": "Data analyst with export capabilities",
         "permissions": [
             "view_dashboard",
+            "upload_custom_dataset",
             "export_data",
             "generate_report",
             "view_building_data_tab",
-            "view_export_reports_tab"
+            "view_export_reports_tab",
+            "city_comparison"
         ]
     },
     "manager": {
         "description": "Building manager with view and export capabilities",
         "permissions": [
             "view_dashboard",
+            "upload_custom_dataset",
             "export_data",
             "generate_report",
             "change_building_data",
             "view_building_data_tab",
-            "view_export_reports_tab"
+            "view_export_reports_tab",
+            "city_comparison"
         ]
     }
 }
@@ -94,18 +100,3 @@ def get_role_description(role):
         return "Unknown role"
     
     return ROLES[role]["description"]
-
-def get_role_permissions(role):
-    """
-    Get the permissions of a role
-    
-    Args:
-        role (str): The role name
-    
-    Returns:
-        list: List of permissions
-    """
-    if role not in ROLES:
-        return []
-    
-    return ROLES[role]["permissions"]

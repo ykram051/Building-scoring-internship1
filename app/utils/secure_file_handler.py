@@ -8,6 +8,7 @@ import streamlit as st
 import hashlib
 from pathlib import Path
 from typing import Tuple, Optional, List, Dict
+from datetime import datetime
 import logging
 import re
 import tempfile
@@ -123,21 +124,32 @@ class SecureFileHandler:
             return False, f"Content validation failed: {str(e)}", {}
     
     def secure_file_upload(self, uploaded_file, user_id: str, dataset_name: str) -> Tuple[bool, str, Optional[Dict]]:
-        """Securely handle file upload with validation"""
+        """Securely handle file upload with validation and user isolation"""
         try:
+            # Enhanced authentication check
+            if not self._validate_user_authentication(user_id):
+                logger.warning(f"Unauthorized file upload attempt by user: {user_id}")
+                return False, "Authentication failed", None
+            
             # Validate file type and size
             is_valid, message = self.validate_file_type(uploaded_file)
             if not is_valid:
                 return False, message, None
             
-            # Sanitize filename and dataset name
+            # Sanitize inputs to prevent injection attacks
             safe_filename = self.sanitize_filename(uploaded_file.name)
             safe_dataset_name = re.sub(r'[^a-zA-Z0-9_-]', '_', dataset_name)
+            safe_user_id = re.sub(r'[^a-zA-Z0-9_-]', '', str(user_id))
             
-            # Get user directory
-            user_dir = self.get_user_upload_dir(user_id)
+            # Get isolated user directory
+            user_dir = self.get_user_upload_dir(safe_user_id)
             
-            # Create temporary file for processing
+            # Verify directory isolation
+            if not self._verify_directory_isolation(user_dir, safe_user_id):
+                logger.error(f"Directory isolation check failed for user: {user_id}")
+                return False, "Security validation failed", None
+            
+            # Create temporary file for secure processing
             with tempfile.NamedTemporaryFile(delete=False) as temp_file:
                 temp_file.write(uploaded_file.read())
                 temp_path = temp_file.name
@@ -152,29 +164,42 @@ class SecureFileHandler:
                 else:
                     return False, "Unsupported file format", None
                 
-                # Validate content
+                # Enhanced content validation
                 is_valid, message, validation_info = self.validate_csv_content(df)
                 if not is_valid:
                     return False, message, None
                 
-                # Generate secure filename with hash
+                # Generate secure filename with hash for uniqueness
                 file_hash = hashlib.sha256(uploaded_file.getvalue()).hexdigest()[:16]
                 final_filename = f"{safe_dataset_name}_{file_hash}{file_extension}"
                 final_path = user_dir / final_filename
                 
-                # Move file to final location
+                # Final security check before file write
+                if not self._validate_final_path(final_path, user_dir):
+                    return False, "Path validation failed", None
+                
+                # Move file to final location with atomic operation
                 shutil.move(temp_path, str(final_path))
+                
+                # Set secure file permissions
+                os.chmod(str(final_path), 0o600)  # Owner read/write only
                 
                 # Prepare result info
                 result_info = {
                     'filename': final_filename,
                     'path': str(final_path),
                     'size': uploaded_file.size,
-                    'validation': validation_info
+                    'validation': validation_info,
+                    'user_id': safe_user_id,
+                    'upload_timestamp': datetime.now().isoformat()
                 }
                 
-                logger.info(f"File uploaded successfully for user {user_id}: {final_filename}")
-                return True, "File uploaded successfully", result_info
+                # Log successful secure upload
+                from utils.logger import log_file_access
+                log_file_access(safe_user_id, str(final_path), "secure_upload", success=True)
+                
+                logger.info(f"File uploaded securely for user {user_id}: {final_filename}")
+                return True, "File uploaded securely", result_info
                 
             finally:
                 # Clean up temp file if it still exists
@@ -182,8 +207,68 @@ class SecureFileHandler:
                     os.unlink(temp_path)
                     
         except Exception as e:
-            logger.error(f"File upload error: {e}")
-            return False, f"Upload failed: {str(e)}", None
+            logger.error(f"Secure file upload error: {e}")
+            # Log security incident
+            from utils.logger import log_file_access
+            log_file_access(str(user_id), "upload_attempt", "secure_upload", success=False)
+            return False, f"Secure upload failed: {str(e)}", None
+    
+    def _validate_user_authentication(self, user_id: str) -> bool:
+        """Validate user authentication and session integrity (less strict)"""
+        if not hasattr(st, 'session_state'):
+            return False
+        if not st.session_state.get("authenticated", False):
+            return False
+        return True
+    
+    def _verify_directory_isolation(self, user_dir: Path, user_id: str) -> bool:
+        """Verify that user directory is properly isolated"""
+        try:
+            # Check that user_dir is within the expected base upload directory
+            expected_base = self.upload_dir.resolve()
+            actual_dir = user_dir.resolve()
+            
+            # Ensure the directory is a subdirectory of upload_dir
+            if not str(actual_dir).startswith(str(expected_base)):
+                logger.error(f"Directory isolation violation: {actual_dir} not under {expected_base}")
+                return False
+            
+            # Verify directory name matches expected pattern
+            expected_dir_name = f"user_{re.sub(r'[^a-zA-Z0-9_-]', '', str(user_id))}"
+            if actual_dir.name != expected_dir_name:
+                logger.error(f"Directory name mismatch: expected {expected_dir_name}, got {actual_dir.name}")
+                return False
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Directory isolation verification failed: {e}")
+            return False
+    
+    def _validate_final_path(self, final_path: Path, user_dir: Path) -> bool:
+        """Final validation of file path before write operation"""
+        try:
+            # Ensure final path is within user directory
+            final_path_resolved = final_path.resolve()
+            user_dir_resolved = user_dir.resolve()
+            
+            # Check path containment
+            if not str(final_path_resolved).startswith(str(user_dir_resolved)):
+                logger.error(f"Path traversal detected: {final_path_resolved} not in {user_dir_resolved}")
+                return False
+            
+            # Check for suspicious filename patterns
+            filename = final_path.name
+            suspicious_patterns = ['..', '/', '\\', '<', '>', ':', '"', '|', '?', '*']
+            if any(pattern in filename for pattern in suspicious_patterns):
+                logger.error(f"Suspicious filename pattern detected: {filename}")
+                return False
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Final path validation failed: {e}")
+            return False
     
     def secure_file_read(self, file_path: str, user_id: str) -> Tuple[bool, Optional[pd.DataFrame], str]:
         """Securely read file with user access validation"""

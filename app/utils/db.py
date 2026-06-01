@@ -125,6 +125,41 @@ def initialize_db():
             );
             """))
             
+            # Create user_datasets table for dynamic schemas
+            conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS user_datasets (
+                id SERIAL PRIMARY KEY,
+                dataset_name VARCHAR(100) NOT NULL,
+                owner VARCHAR(50) REFERENCES users(username) ON DELETE CASCADE,
+                display_name VARCHAR(200),
+                description TEXT,
+                file_name VARCHAR(255),
+                file_size BIGINT,
+                row_count INTEGER,
+                column_count INTEGER,
+                schema_info JSONB NOT NULL,
+                storage_type VARCHAR(20) DEFAULT 'jsonb',
+                table_name VARCHAR(100),
+                upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_accessed TIMESTAMP,
+                is_public BOOLEAN DEFAULT FALSE,
+                tags TEXT[],
+                checksum VARCHAR(64),
+                UNIQUE(dataset_name, owner)
+            );
+            """))
+            
+            # Create dataset_data table for JSONB storage
+            conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS dataset_data (
+                id SERIAL PRIMARY KEY,
+                dataset_id INTEGER REFERENCES user_datasets(id) ON DELETE CASCADE,
+                row_index INTEGER,
+                data JSONB NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """))
+            
             # Create buildings table
             conn.execute(text("""
             CREATE TABLE IF NOT EXISTS buildings (
@@ -185,6 +220,19 @@ def initialize_db():
                 changes JSONB
             );
             """))
+            
+            # Create indexes for performance
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_buildings_dataset_id ON buildings(dataset_id);"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_buildings_city ON buildings(city);"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_buildings_coords ON buildings(latitude, longitude);"))
+            
+            # Indexes for user_datasets
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_user_datasets_owner ON user_datasets(owner);"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_user_datasets_name_owner ON user_datasets(dataset_name, owner);"))
+            
+            # Indexes for dataset_data  
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_dataset_data_dataset_id ON dataset_data(dataset_id);"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_dataset_data_jsonb ON dataset_data USING GIN (data);"))
         
         logger.info("Database initialized successfully")
         return True
@@ -235,8 +283,3 @@ def get_db_connection():
     engine = get_db_engine()
     return engine.connect()
 
-# Create a Streamlit cache for database connections
-@st.cache_resource
-def get_cached_db_engine():
-    """Get a cached database engine for reuse."""
-    return get_db_engine()

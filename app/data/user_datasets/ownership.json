@@ -1,1 +1,22 @@
-{"Gordes": {"owner": "test1", "uploaded_at": "2025-08-04 11:49:12", "processed_with": "standard_processing"}, "Auch": {"owner": "user", "uploaded_at": "2025-08-04 11:47:52", "processed_with": "standard_processing"}}
+{
+  "Gordes": {
+    "owner": "test1",
+    "uploaded_at": "2025-08-04 11:49:12",
+    "processed_with": "standard_processing"
+  },
+  "Ciry-le-Noble": {
+    "owner": "user",
+    "uploaded_at": "2025-10-07 13:12:37",
+    "processed_with": "secure_upload"
+  },
+  "Lille": {
+    "owner": "test1",
+    "uploaded_at": "2025-09-09 00:59:33",
+    "processed_with": "legacy"
+  },
+  "gordes": {
+    "owner": "user",
+    "uploaded_at": "2025-10-07 13:09:15",
+    "processed_with": "secure_upload"
+  }
+}

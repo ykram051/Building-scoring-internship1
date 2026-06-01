@@ -49,6 +49,106 @@ section[data-testid="stSidebar"] {
     background-color: rgba(30, 37, 54, 0.4);
 }
 
+/* Enhanced Chatbot Styling */
+.chatbot-container {
+    background-color: #1e2329 !important;
+    border-radius: 10px;
+    padding: 20px;
+    margin: 10px 0;
+}
+
+.user-message {
+    background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%) !important;
+    color: #0d47a1 !important;
+    padding: 15px;
+    border-radius: 15px 15px 5px 15px;
+    margin: 10px 0;
+    border-left: 4px solid #2196f3;
+    box-shadow: 0 2px 10px rgba(33, 150, 243, 0.2);
+}
+
+.assistant-message {
+    background: linear-gradient(135deg, #f1f8e9 0%, #dcedc8 100%) !important;
+    color: #1b5e20 !important;
+    padding: 15px;
+    border-radius: 15px 15px 15px 5px;
+    margin: 10px 0;
+    border-left: 4px solid #4caf50;
+    box-shadow: 0 2px 10px rgba(76, 175, 80, 0.2);
+}
+
+.chat-input-container {
+    background-color: #262730 !important;
+    border-radius: 10px;
+    padding: 15px;
+    margin: 20px 0;
+    border: 2px solid #4caf50;
+}
+
+.quick-question-btn {
+    background: linear-gradient(45deg, #4caf50, #81c784) !important;
+    color: white !important;
+    border: none !important;
+    border-radius: 25px !important;
+    padding: 10px 20px !important;
+    margin: 5px !important;
+    transition: all 0.3s ease !important;
+}
+
+.quick-question-btn:hover {
+    transform: translateY(-2px) !important;
+    box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4) !important;
+}
+
+.chatbot-header {
+    background: linear-gradient(135deg, #1976d2, #42a5f5);
+    color: white;
+    padding: 20px;
+    border-radius: 10px 10px 0 0;
+    text-align: center;
+}
+
+.ai-status-active {
+    background: linear-gradient(45deg, #4caf50, #81c784);
+    color: white;
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-weight: bold;
+    display: inline-block;
+    margin: 5px 0;
+}
+
+.ai-status-demo {
+    background: linear-gradient(45deg, #ff9800, #ffb74d);
+    color: white;
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-weight: bold;
+    display: inline-block;
+    margin: 5px 0;
+}
+
+/* Improve chat message styling */
+[data-testid="chatAvatarIcon-user"] {
+    background-color: #2196f3 !important;
+}
+
+[data-testid="chatAvatarIcon-assistant"] {
+    background-color: #4caf50 !important;
+}
+
+/* Style the chat input */
+[data-testid="stChatInput"] > div {
+    background-color: #262730 !important;
+    border: 2px solid #4caf50 !important;
+    border-radius: 10px !important;
+}
+
+[data-testid="stChatInput"] input {
+    color: #ffffff !important;
+    background-color: transparent !important;
+}
+
 /* Role-based color indicators */
 .admin-mode {
     border-left: 4px solid #ff9800;
@@ -280,6 +380,120 @@ section[data-testid="stSidebar"] {
     border-color: #444444 !important;
 }
 
+/* Selectbox dropdown styling - Fix white text on white background */
+.stSelectbox > div > div {
+    background-color: #2d2d2d !important;
+    color: #ffffff !important;
+    border: 1px solid #444444 !important;
+}
+
+/* Selectbox input field */
+.stSelectbox input {
+    background-color: #2d2d2d !important;
+    color: #ffffff !important;
+    border: 1px solid #444444 !important;
+}
+
+/* Selectbox dropdown menu */
+.stSelectbox [role="listbox"] {
+    background-color: #2d2d2d !important;
+    border: 1px solid #444444 !important;
+}
+
+/* Selectbox dropdown options */
+.stSelectbox [role="option"] {
+    background-color: #2d2d2d !important;
+    color: #ffffff !important;
+}
+
+/* Selectbox dropdown options on hover */
+.stSelectbox [role="option"]:hover {
+    background-color: #444444 !important;
+    color: #ffffff !important;
+}
+
+/* Selectbox selected option */
+.stSelectbox [role="option"][aria-selected="true"] {
+    background-color: #0077cc !important;
+    color: #ffffff !important;
+}
+
+/* MultiSelect styling */
+.stMultiSelect > div > div {
+    background-color: #2d2d2d !important;
+    color: #ffffff !important;
+    border: 1px solid #444444 !important;
+}
+
+.stMultiSelect [role="listbox"] {
+    background-color: #2d2d2d !important;
+    border: 1px solid #444444 !important;
+}
+
+.stMultiSelect [role="option"] {
+    background-color: #2d2d2d !important;
+    color: #ffffff !important;
+}
+
+.stMultiSelect [role="option"]:hover {
+    background-color: #444444 !important;
+    color: #ffffff !important;
+}
+
+/* Text input fields */
+.stTextInput > div > div > input {
+    background-color: #2d2d2d !important;
+    color: #ffffff !important;
+    border: 1px solid #444444 !important;
+}
+
+/* Number input fields */
+.stNumberInput > div > div > input {
+    background-color: #2d2d2d !important;
+    color: #ffffff !important;
+    border: 1px solid #444444 !important;
+}
+
+/* Date input fields */
+.stDateInput > div > div > input {
+    background-color: #2d2d2d !important;
+    color: #ffffff !important;
+    border: 1px solid #444444 !important;
+}
+
+/* Generic dropdown menu styling */
+div[data-baseweb="select"] {
+    background-color: #2d2d2d !important;
+    color: #ffffff !important;
+    border: 1px solid #444444 !important;
+}
+
+/* Generic dropdown options */
+div[data-baseweb="menu"] {
+    background-color: #2d2d2d !important;
+    border: 1px solid #444444 !important;
+}
+
+div[data-baseweb="menu"] [role="option"] {
+    background-color: #2d2d2d !important;
+    color: #ffffff !important;
+}
+
+div[data-baseweb="menu"] [role="option"]:hover {
+    background-color: #444444 !important;
+    color: #ffffff !important;
+}
+
+/* Radio button labels */
+.stRadio > div > label {
+    color: #ffffff !important;
+}
+
+/* Checkbox labels */
+.stCheckbox > div > label {
+    color: #ffffff !important;
+}
+
 /* Ensure data tables have proper contrast */
 .stTable, 
 .dataframe {
@@ -387,4 +601,178 @@ h1, h2, h3, h4, h5, h6 {
 /* Make sure all text elements inherit the dark theme */
 div, p, span, label {
     color: #ffffff;
+}
+
+/* Additional specific Streamlit component fixes */
+/* Fix for Streamlit selectbox dropdown */
+.stSelectbox div[data-baseweb="select"] > div {
+    background-color: #2d2d2d !important;
+    color: #ffffff !important;
+    border: 1px solid #444444 !important;
+}
+
+/* Fix for selectbox single value display */
+.stSelectbox div[data-baseweb="select"] span {
+    color: #ffffff !important;
+}
+
+/* Fix for selectbox dropdown arrow */
+.stSelectbox div[data-baseweb="select"] svg {
+    fill: #ffffff !important;
+}
+
+/* Fix for any remaining white backgrounds in dropdowns */
+div[role="listbox"], 
+div[role="menu"],
+ul[role="listbox"],
+ul[role="menu"] {
+    background-color: #2d2d2d !important;
+    border: 1px solid #444444 !important;
+}
+
+/* Fix for dropdown option text */
+li[role="option"], 
+div[role="option"] {
+    background-color: #2d2d2d !important;
+    color: #ffffff !important;
+}
+
+li[role="option"]:hover, 
+div[role="option"]:hover {
+    background-color: #444444 !important;
+    color: #ffffff !important;
+}
+
+/* Fix for selected dropdown option */
+li[role="option"][aria-selected="true"], 
+div[role="option"][aria-selected="true"] {
+    background-color: #0077cc !important;
+    color: #ffffff !important;
+}
+
+/* Fix for any BaseWeb components */
+div[data-baseweb] {
+    color: #ffffff !important;
+}
+
+/* Fix for year selector and other dropdown components */
+div[data-testid="stSelectbox"] {
+    background-color: #2d2d2d !important;
+}
+
+div[data-testid="stSelectbox"] > div {
+    background-color: #2d2d2d !important;
+    border: 1px solid #444444 !important;
+}
+
+div[data-testid="stSelectbox"] input {
+    background-color: #2d2d2d !important;
+    color: #ffffff !important;
+}
+
+/* Fix for multiselect components */
+div[data-testid="stMultiSelect"] {
+    background-color: #2d2d2d !important;
+}
+
+div[data-testid="stMultiSelect"] > div {
+    background-color: #2d2d2d !important;
+    border: 1px solid #444444 !important;
+}
+
+/* Ensure all form control text is white */
+.css-1cpxqw2, .css-1x8cf1d, .css-1d391kg {
+    color: #ffffff !important;
+}
+
+/* Override any remaining Streamlit default styles */
+.element-container div, 
+.element-container span,
+.element-container label {
+    color: #ffffff !important;
+}
+
+/* Force styling on all select elements */
+select, 
+option {
+    background-color: #2d2d2d !important;
+    color: #ffffff !important;
+    border: 1px solid #444444 !important;
+}
+
+/* Additional CSS for edge cases */
+/* Universal form element styling */
+input[type="text"],
+input[type="number"],
+input[type="email"],
+input[type="password"],
+input[type="search"],
+textarea,
+select {
+    background-color: #2d2d2d !important;
+    color: #ffffff !important;
+    border: 1px solid #444444 !important;
+}
+
+/* Ensure dropdown menus have dark background */
+.dropdown-menu,
+.select-dropdown,
+[class*="dropdown"],
+[class*="select"] {
+    background-color: #2d2d2d !important;
+    color: #ffffff !important;
+    border: 1px solid #444444 !important;
+}
+
+/* Fix for any React-Select components (used by Streamlit) */
+.css-1pahdxg-control,
+.css-yk16xz-control,
+.css-1hwfws3 {
+    background-color: #2d2d2d !important;
+    border-color: #444444 !important;
+}
+
+.css-1uccc91-singleValue,
+.css-1wa3eu0-placeholder {
+    color: #ffffff !important;
+}
+
+/* React-Select dropdown menu */
+.css-26l3qy-menu {
+    background-color: #2d2d2d !important;
+    border: 1px solid #444444 !important;
+}
+
+.css-1n7v3ny-option {
+    background-color: #2d2d2d !important;
+    color: #ffffff !important;
+}
+
+.css-1n7v3ny-option:hover {
+    background-color: #444444 !important;
+    color: #ffffff !important;
+}
+
+/* Catch-all for any remaining white backgrounds */
+[style*="background-color: rgb(255, 255, 255)"],
+[style*="background: white"],
+[style*="background: #fff"],
+[style*="background-color: white"] {
+    background-color: #2d2d2d !important;
+    color: #ffffff !important;
+}
+
+/* Universal text color override */
+* {
+    color: #ffffff !important;
+}
+
+/* But keep some elements with their intended colors */
+.stButton > button,
+.admin-badge,
+[class*="success"],
+[class*="error"],
+[class*="warning"],
+[class*="info"] {
+    color: initial !important;
 }

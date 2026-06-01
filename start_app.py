@@ -37,7 +37,6 @@ def main():
     try:
         # Try to run with conda environment first (if available)
         import subprocess
-        import os
         
         # Check if conda is available
         conda_path = "C:/Users/USER/anaconda3/Scripts/conda.exe"

@@ -1,1 +1,14 @@
-{}
+{
+  "city1": {
+    "owner": "admin",
+    "uploaded_at": "2025-09-08 22:58:00",
+    "processed_with": "flexible"
+  },
+  "city2": {
+    "owner": "user",
+    "uploaded_at": "2025-09-08 22:58:00",
+    "processed_with": "standard_processing"
+  }
+}
+
+

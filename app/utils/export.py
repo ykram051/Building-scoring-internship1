@@ -33,19 +33,18 @@ def log_data_export(filename, format_type, record_count):
     
     # Log the export event
     log_dataset_access(
-        dataset_name=dataset_name,
         username=username,
+        dataset_name=dataset_name,
         action="export",
-        allowed=True
+        success=True
     )
     
     # Log details about what was exported
     log_data_change(
-        action="export",
         username=username,
-        dataset=dataset_name,
-        entity_id=None,
-        changes={
+        dataset_name=dataset_name,
+        change_type="export",
+        details={
             "filename": filename,
             "format": format_type,
             "record_count": record_count

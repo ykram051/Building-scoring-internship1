@@ -2,6 +2,30 @@
 
 A Streamlit-based dashboard for analyzing building energy efficiency with multiple classification models and interactive visualizations, now with PostgreSQL database integration for scalable enterprise deployment.
 
+## 🚀 **New: Flexible Dataset Management**
+
+The application now supports uploading datasets with **arbitrary schemas** while maintaining security and performance:
+
+### 📊 Dynamic Schema Support
+- **Upload any CSV/Excel** with custom column structures
+- **Automatic schema detection** and validation
+- **Hybrid storage**: JSONB for flexibility + dedicated tables for performance
+- **Advanced querying** with filters and column selection
+
+### 🔍 Dataset Explorer
+- **Interactive dataset browser** with preview and analysis
+- **Flexible query builder** for custom data exploration  
+- **Export capabilities** for processed results
+- **Schema visualization** and statistics
+
+### 🔒 Enterprise Security
+- **User data isolation** - users only access their datasets
+- **Role-based permissions** for upload, view, and delete
+- **Comprehensive audit logging** of all dataset operations
+- **Secure file validation** and processing
+
+For detailed information, see the [Dynamic Datasets Guide](docs/DYNAMIC_DATASETS.md).
+
 ## Features
 
 - Interactive map visualization of building energy classes
@@ -357,7 +381,26 @@ If you're setting up the application locally for development or administration:
 
 ## Uploading Custom Datasets
 
-The application supports custom building dataset uploads. Requirements:
+The application supports both **legacy** and **flexible** dataset uploads:
+
+### 🆕 Flexible Dataset Upload (Recommended)
+Upload datasets with arbitrary schemas while maintaining full functionality:
+
+1. **Any CSV/Excel format** with custom column structures
+2. **Automatic processing**:
+   - Schema detection and validation
+   - Data type inference
+   - Missing value handling
+   - Performance optimization (JSONB vs dedicated tables)
+
+3. **Advanced features**:
+   - Dataset explorer with query builder
+   - Schema visualization and statistics
+   - Flexible export options
+   - Full audit trail
+
+### 📁 Legacy Dataset Upload
+For building energy datasets with standardized schemas:
 
 1. CSV format with building data
 2. Required columns:
@@ -372,6 +415,11 @@ The upload process will:
 4. Store data in both file system and database
 5. Make the dataset immediately available as a selectable city
 
-For details on the data processing workflow, see the `app/data/DataPreprocessing.ipynb` notebook.
+### 🔄 Migration
+- Existing datasets continue to work unchanged
+- New uploads automatically use the flexible system
+- Run `python scripts/migrate_flexible_datasets.py` to initialize
+
+For details on the data processing workflow, see the [Dynamic Datasets Guide](docs/DYNAMIC_DATASETS.md).
 
 ## Development

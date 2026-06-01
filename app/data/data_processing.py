@@ -3,9 +3,11 @@ Unified Data Processing Module
 
 This module provides utilities for processing building-performance datasets from
 various sources, including local CSV files and PostgreSQL databases.
+Now integrated with dynamic dataset management for arbitrary schemas.
 """
 
 import os
+import streamlit as st
 import pandas as pd
 import numpy as np
 import json
@@ -16,9 +18,117 @@ from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 import logging
-from utils.db import query_to_dataframe, execute_query, dataframe_to_sql
+from utils.unified_db_manager import get_unified_db_manager
+
+# Helper functions for database operations
+def query_to_dataframe(query, params=None):
+    """Execute a query and return results as a pandas DataFrame."""
+    db_manager = get_unified_db_manager()
+    if db_manager.is_initialized():
+        return db_manager.dataframe_from_query(query, params)
+    return pd.DataFrame()
+
+def execute_query(query, params=None, fetch=True):
+    """Execute a SQL query and optionally return results."""
+    db_manager = get_unified_db_manager()
+    if db_manager.is_initialized():
+        return db_manager.execute_query(query, params, fetch)
+    return None
+
+def dataframe_to_sql(df, table_name, if_exists='append'):
+    """Save a DataFrame to the database."""
+    db_manager = get_unified_db_manager()
+    if db_manager.is_initialized():
+        return db_manager.save_dataframe(df, table_name, if_exists)
+    return False
+
+# Import the new dataset manager
+try:
+    from utils.dataset_manager import dataset_manager
+    DATASET_MANAGER_AVAILABLE = True
+except ImportError:
+    DATASET_MANAGER_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+
+def upload_flexible_dataset(uploaded_file, dataset_name, display_name=None, description=None, tags=None):
+    """
+    Upload dataset with arbitrary schema using the new dataset manager.
+    
+    Args:
+        uploaded_file: File object from Streamlit
+        dataset_name: Unique name for the dataset
+        display_name: Human-readable display name
+        description: Optional description
+        tags: Optional tags for categorization
+        
+    Returns:
+        tuple: (success, message, dataset_id)
+    """
+    if not DATASET_MANAGER_AVAILABLE:
+        # Fallback to legacy processing
+        logger.warning("Dataset manager not available, using legacy processing")
+        try:
+            result = process_uploaded_data(uploaded_file)
+            if result is not None and len(result) == 2:
+                processed_df, city_name = result
+                if processed_df is not None and not processed_df.empty:
+                    return True, f"Dataset '{city_name}' uploaded successfully (legacy processing)", None
+                else:
+                    return False, "Failed to process uploaded dataset", None
+            else:
+                return False, "Failed to process uploaded dataset", None
+        except Exception as e:
+            logger.error(f"Legacy processing failed: {e}")
+            return False, f"Upload failed: {str(e)}", None
+    
+    try:
+        # Initialize dataset manager schema if needed
+        dataset_manager.initialize_schema()
+        
+        # Upload using the new manager
+        success, message, dataset_id = dataset_manager.upload_dataset(
+            uploaded_file=uploaded_file,
+            dataset_name=dataset_name,
+            display_name=display_name,
+            description=description,
+            tags=tags
+        )
+        
+        return success, message, dataset_id
+        
+    except Exception as e:
+        logger.error(f"Flexible dataset upload failed: {e}")
+        return False, f"Upload failed: {str(e)}", None
+
+def get_dataset_ownership(dataset_name):
+    """
+    Get dataset ownership information from the ownership.json file
+    
+    Args:
+        dataset_name (str): Name of the dataset to check
+
+    Returns:
+        dict: Ownership information or None if not found
+    """
+    try:
+        # Try different paths for the ownership file
+        possible_paths = [
+            os.path.join("data", "user_datasets", "ownership.json"),
+            os.path.join("app", "data", "user_datasets", "ownership.json"),
+            os.path.join(os.path.dirname(__file__), "user_datasets", "ownership.json")
+        ]
+        
+        for path in possible_paths:
+            if os.path.exists(path):
+                with open(path, 'r') as f:
+                    ownership_data = json.load(f)
+                    if dataset_name in ownership_data:
+                        return ownership_data[dataset_name]
+        return None
+    except Exception as e:
+        logger.error(f"Error reading dataset ownership: {e}")
+        return None
 
 # Unified function to process city data
 def process_city_data(city_name, input_source="csv", input_filename=None, year=None):
@@ -56,6 +166,18 @@ def process_city_data(city_name, input_source="csv", input_filename=None, year=N
             print(f"Trying to load {city_name} from CSV file instead...")
             data = _process_city_data_csv(city_name, input_filename)
     
+    # Add classification columns if they don't exist
+    if data is not None and not data.empty:
+        # Check if classification columns exist
+        class_columns = ['class_pca', 'class_cosine', 'class_mahalanobis', 'class_weighted', 'class_tree', 'class_topsis']
+        missing_classes = [col for col in class_columns if col not in data.columns]
+        
+        if missing_classes:
+            print(f"Adding missing classification columns: {missing_classes}")
+            # Add default classification columns with 'C' values
+            for col in missing_classes:
+                data[col] = 'C'
+                
     # Return whatever data we could find (might still be None)
     return data
 
@@ -314,6 +436,20 @@ def load_city_data_db(city_name):
         # Ensure consistent column names
         if "id" in df.columns and "building_id" not in df.columns:
             df = df.rename(columns={"id": "building_id"})
+        
+        # Standardize column names to match expected format
+        column_mapping = {
+            "energy_consumption": "Energy_Consumption",
+            "co2_usage": "CO2_Usage", 
+            "water_usage": "Water_Usage",
+            "energy_intensity": "Energy_Intensity",
+            "co2_intensity": "CO2_Intensity"
+        }
+        
+        # Apply column mapping if columns exist
+        existing_mapping = {k: v for k, v in column_mapping.items() if k in df.columns}
+        if existing_mapping:
+            df = df.rename(columns=existing_mapping)
             
         return df
     except Exception as e:
@@ -373,6 +509,21 @@ def load_city_data_from_file(city_name):
                     print(f"✅ Found file: {file_path}")
                     logger.info(f"Loading data for {city_name} from {file_path}")
                     df = pd.read_csv(file_path)
+                    
+                    # Standardize column names to match expected format
+                    column_mapping = {
+                        "energy_consumption": "Energy_Consumption",
+                        "co2_usage": "CO2_Usage", 
+                        "water_usage": "Water_Usage",
+                        "energy_intensity": "Energy_Intensity",
+                        "co2_intensity": "CO2_Intensity"
+                    }
+                    
+                    # Apply column mapping if columns exist
+                    existing_mapping = {k: v for k, v in column_mapping.items() if k in df.columns}
+                    if existing_mapping:
+                        df = df.rename(columns=existing_mapping)
+                    
                     # Add city column if not present to help with identification
                     if 'city' not in df.columns:
                         df['city'] = city_name
@@ -390,7 +541,23 @@ def load_city_data_from_file(city_name):
                 if os.path.exists(recreated_file):
                     print(f"✅ Successfully recreated data for {city_name}")
                     logger.info(f"Successfully recreated data for {city_name}")
-                    return pd.read_csv(recreated_file)
+                    df = pd.read_csv(recreated_file)
+                    
+                    # Standardize column names to match expected format
+                    column_mapping = {
+                        "energy_consumption": "Energy_Consumption",
+                        "co2_usage": "CO2_Usage", 
+                        "water_usage": "Water_Usage",
+                        "energy_intensity": "Energy_Intensity",
+                        "co2_intensity": "CO2_Intensity"
+                    }
+                    
+                    # Apply column mapping if columns exist
+                    existing_mapping = {k: v for k, v in column_mapping.items() if k in df.columns}
+                    if existing_mapping:
+                        df = df.rename(columns=existing_mapping)
+                    
+                    return df
         
         # Try default cities as a last resort
         for default_city in ["lyon", "lille", "gordes", "nancy"]:
@@ -400,7 +567,23 @@ def load_city_data_from_file(city_name):
                     if os.path.exists(default_file):
                         print(f"⚠️ Could not find {city_name} data, falling back to {default_city}")
                         logger.warning(f"Could not find {city_name} data, falling back to {default_city}")
-                        return pd.read_csv(default_file)
+                        df = pd.read_csv(default_file)
+                        
+                        # Standardize column names to match expected format
+                        column_mapping = {
+                            "energy_consumption": "Energy_Consumption",
+                            "co2_usage": "CO2_Usage", 
+                            "water_usage": "Water_Usage",
+                            "energy_intensity": "Energy_Intensity",
+                            "co2_intensity": "CO2_Intensity"
+                        }
+                        
+                        # Apply column mapping if columns exist
+                        existing_mapping = {k: v for k, v in column_mapping.items() if k in df.columns}
+                        if existing_mapping:
+                            df = df.rename(columns=existing_mapping)
+                        
+                        return df
         
         print(f"❌ Could not find any data files for city: {city_name}")
         logger.error(f"No data files found for city: {city_name}")
@@ -420,7 +603,7 @@ def load_city_data_from_file(city_name):
 
 def get_available_cities(username=None, user_role=None):
     """
-    Get list of available cities for a specific user.
+    Get list of available cities for a specific user with enhanced security.
     
     Args:
         username (str, optional): Username to filter datasets by. If None, returns all cities.
@@ -429,9 +612,25 @@ def get_available_cities(username=None, user_role=None):
     Returns:
         list: List of available city names for the user
     """
+    # Validate authentication first
+    if hasattr(st, 'session_state'):
+        if not st.session_state.get("authenticated", False):
+            logger.warning("Unauthenticated user attempted to access available cities")
+            return []
+        
+        # Validate session username matches requested username
+        session_username = st.session_state.get("username")
+        if username and username != session_username and user_role != "admin":
+            logger.warning(f"User {session_username} attempted to access cities for {username}")
+            return []
+    
     # Admin users can see all datasets
     if user_role == "admin":
         return _get_all_cities()
+    
+    # For non-authenticated requests without username, return empty
+    if not username:
+        return []
     
     # Use a dictionary to track the preferred case version of each city
     # Keys are lowercase city names, values are the preferred capitalized version
@@ -456,6 +655,21 @@ def get_available_cities(username=None, user_role=None):
         except Exception as e:
             if logger.isEnabledFor(logging.DEBUG):  # Only log if debug is enabled
                 logger.error(f"Error getting user cities from database: {e}")
+
+        # Add datasets from the new dataset manager
+        if DATASET_MANAGER_AVAILABLE:
+            try:
+                user_datasets_df = dataset_manager.get_user_datasets(username)
+                if not user_datasets_df.empty:
+                    for _, dataset in user_datasets_df.iterrows():
+                        dataset_name = dataset['dataset_name']
+                        city_lower = dataset_name.lower()
+                        if city_lower not in unique_cities:
+                            unique_cities[city_lower] = dataset_name
+                            found_sources[city_lower] = "dynamic_dataset"
+            except Exception as e:
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.error(f"Error getting dynamic datasets: {e}")
 
         # For regular users, also check their user_datasets folder
         possible_data_dirs = [
@@ -886,8 +1100,8 @@ def process_uploaded_data(uploaded_file, username=None):
         
         # Update progress
         progress_bar.progress(80, text=f"{progress_text} (Saving files)")
-        
-        # Save processed files - with minimal logging
+            
+        # Save to filesystem as backup
         os.makedirs("data", exist_ok=True)
         
         # Define output filenames
@@ -908,59 +1122,8 @@ def process_uploaded_data(uploaded_file, username=None):
         try:
             future_year = current_year + 1
             
-            # Define vectorized helper function for generating multipliers
-            def generate_future_data(df, future_year):
-                """Generate future data more efficiently with vectorized operations"""
-                future_df = df.copy()
-                future_df['year'] = future_year
-                
-                n_buildings = len(future_df)
-                
-                # Generate scenarios and multipliers in one go
-                scenarios = np.random.choice(["normal", "uniform", "lognormal"], 
-                                          size=n_buildings, p=[0.6, 0.3, 0.1])
-                
-                # Pre-generate all multipliers at once
-                multipliers = np.zeros(n_buildings)
-                
-                # Normal distribution (60% of buildings)
-                normal_mask = scenarios == "normal"
-                multipliers[normal_mask] = np.random.normal(loc=1.0, scale=0.05, size=normal_mask.sum())
-                
-                # Uniform distribution (30% of buildings)
-                uniform_mask = scenarios == "uniform"
-                multipliers[uniform_mask] = np.random.uniform(0.9, 1.1, size=uniform_mask.sum())
-                
-                # Lognormal distribution (10% of buildings)
-                lognormal_mask = scenarios == "lognormal"
-                multipliers[lognormal_mask] = np.random.lognormal(mean=0, sigma=0.1, size=lognormal_mask.sum())
-                
-                # Apply multipliers to core metrics
-                for col in ["Energy_Consumption", "Energy_Intensity"]:
-                    if col in future_df.columns:
-                        future_df[col] *= multipliers
-                        
-                for col in ["CO2_Usage", "CO2_Intensity"]:
-                    if col in future_df.columns:
-                        # Generate different multipliers for CO2
-                        co2_multipliers = np.random.normal(loc=1.0, scale=0.05, size=n_buildings)
-                        future_df[col] *= co2_multipliers
-                
-                if "Water_Usage" in future_df.columns:
-                    # Generate different multipliers for water
-                    water_multipliers = np.random.normal(loc=1.0, scale=0.05, size=n_buildings)
-                    future_df["Water_Usage"] *= water_multipliers
-                
-                # Re-calculate log transformations
-                for col in existing_numeric:
-                    log_col = f"log1p_{col}"
-                    if log_col in future_df.columns:
-                        future_df[log_col] = np.log1p(future_df[col])
-                
-                return future_df
-            
-            # Generate future data in one function call
-            future_df = generate_future_data(df_clean, future_year)
+            # Generate future data using the main function
+            future_df = generate_future_data(df_clean, city_name, future_year)
             
             # Save future year data
             future_output = f"reduced_{city_name.lower()}_buildings_{future_year}.csv"
@@ -975,25 +1138,18 @@ def process_uploaded_data(uploaded_file, username=None):
             # Continue processing - this is non-critical
         
         # Update progress
-        progress_bar.progress(90, text=f"{progress_text} (Saving to database)")
+        progress_bar.progress(90, text=f"{progress_text} (Finalizing)")
         
-        # Try to save to database
+        # Try to save dataset to database using unified system
         try:
             if username:
-                # Create dataset entry
-                from utils.db import dataframe_to_sql, execute_query
-                result = execute_query("""
-                    INSERT INTO datasets (name, city, owner, created_at)
-                    VALUES (%s, %s, %s, %s) RETURNING id
-                """, (city_name, city_name, username, datetime.now().isoformat()), fetch=True)
-                
-                if result and result[0]:
-                    dataset_id = result[0][0]
-                    df_clean["dataset_id"] = dataset_id
-                    
-                    # Save to database
-                    dataframe_to_sql(df_clean, "buildings")
-                    logger.info(f"Saved {len(df_clean)} rows to database for dataset {dataset_id}")
+                # Use the unified database manager
+                db_manager = get_unified_db_manager()
+                if db_manager.is_initialized():
+                    # Simple database save
+                    result = dataframe_to_sql(df_clean, f"{city_name}_buildings")
+                    if result:
+                        logger.info(f"Saved {len(df_clean)} rows to database for {city_name}")
         except Exception as e:
             logger.warning(f"Could not save to database: {str(e)}")
             # Continue with file-based approach
@@ -1015,109 +1171,16 @@ def process_uploaded_data(uploaded_file, username=None):
         logger.error(traceback.format_exc())
         return None, None
 
-def process_city_with_years(city_name, input_filename, base_year=None, future_years=None):
-    """
-    Process city data and generate predictions for future years.
-    
-    Args:
-        city_name (str): Name of the city
-        input_filename (str): Input filename for the data
-        base_year (int, optional): Base year for the data
-        future_years (list, optional): List of future years to generate predictions for
-        
-    Returns:
-        pd.DataFrame: DataFrame containing the city's building data for all years
-    """
-    try:
-        # Default values
-        if base_year is None:
-            base_year = datetime.now().year
-        
-        if future_years is None:
-            future_years = [base_year + 1]
-        
-        # Read the input file
-        df = pd.read_csv(input_filename)
-        
-        # Add year column if missing
-        if "year" not in df.columns:
-            df["year"] = base_year
-        
-        # Make copies for future years with simulated changes
-        dfs = [df.copy()]  # Include original data
-        
-        for year in future_years:
-            if year != base_year:
-                future_df = df.copy()
-                future_df["year"] = year
-                
-                # Simulate changes (e.g., 2-5% improvement in key metrics)
-                improvement = np.random.uniform(0.02, 0.05)  # 2-5% improvement
-                
-                # Apply improvements to key metrics
-                for col in ["Energy_Consumption", "CO2_Usage", "Water_Usage"]:
-                    if col in future_df.columns:
-                        future_df[col] = future_df[col] * (1 - improvement)
-                
-                dfs.append(future_df)
-        
-        # Combine all years
-        combined_df = pd.concat(dfs, ignore_index=True)
-        
-        # Save to database if available
-        try:
-            # Get or create dataset in DB
-            dataset_id = get_city_dataset_id(city_name)
-            
-            if not dataset_id:
-                # Create new dataset
-                query = """
-                INSERT INTO datasets (name, city, owner, created_at)
-                VALUES (:name, :city, :owner, :created_at)
-                RETURNING id
-                """
-                result = execute_query(query, {
-                    "name": city_name,
-                    "city": city_name,
-                    "owner": "system",  # Default owner for system-generated data
-                    "created_at": datetime.now().isoformat()
-                }, fetch=True)
-                
-                if result and result[0]:
-                    dataset_id = result[0][0]
-            
-            if dataset_id:
-                # Add dataset_id to dataframe
-                combined_df["dataset_id"] = dataset_id
-                
-                # Save to database
-                dataframe_to_sql(combined_df, "buildings")
-        except Exception as e:
-            logger.error(f"Error saving city data with years to database: {e}")
-        
-        return combined_df
-    
-    except Exception as e:
-        logger.error(f"Error processing city with years: {e}")
-        return None
-
 def delete_dataset(city_name, username=None):
     """
     Delete a dataset completely from both filesystem and database.
-    
-    Args:
-        city_name (str): Name of the city/dataset to delete
-        username (str, optional): Username requesting the deletion (for permission checking)
-    
-    Returns:
-        tuple: (success, message) where success is a boolean and message describes the result
     """
     import os
     import glob
     import shutil
+    import json
     
-    logger.info(f"Attempting to delete dataset: {city_name}")
-    print(f"Attempting to delete dataset: {city_name}")
+    print(f"=== DELETING DATASET: {city_name} ===")
     
     success = True
     message = ""
@@ -1126,126 +1189,75 @@ def delete_dataset(city_name, username=None):
     # 1. Check if this is a built-in dataset that shouldn't be deleted
     protected_datasets = ["lyon", "lille", "gordes", "nancy"]
     if city_name.lower() in protected_datasets:
-        logger.warning(f"Cannot delete protected dataset: {city_name}")
+        print(f"Cannot delete protected dataset: {city_name}")
         return False, f"'{city_name}' is a built-in dataset and cannot be deleted."
     
     # 2. Delete from database if connected
     try:
-        # First get the dataset ID
         dataset_id = get_city_dataset_id(city_name)
-        
         if dataset_id:
-            # Delete from buildings table
-            execute_query(
-                "DELETE FROM buildings WHERE dataset_id = :dataset_id",
-                {"dataset_id": dataset_id}
-            )
-            logger.info(f"Deleted buildings with dataset_id={dataset_id}")
-            print(f"Deleted buildings with dataset_id={dataset_id}")
-            
-            # Delete from datasets table
-            execute_query(
-                "DELETE FROM datasets WHERE id = :dataset_id",
-                {"dataset_id": dataset_id}
-            )
-            logger.info(f"Deleted dataset with id={dataset_id}")
-            print(f"Deleted dataset with id={dataset_id}")
-            
-            message += f"Deleted dataset from database. "
-        else:
-            logger.info(f"No database entry found for dataset: {city_name}")
-            print(f"No database entry found for dataset: {city_name}")
+            db_manager = get_unified_db_manager()
+            if db_manager.is_initialized():
+                db_manager.execute_query("DELETE FROM buildings WHERE dataset_id = :dataset_id", {"dataset_id": dataset_id})
+                db_manager.execute_query("DELETE FROM datasets WHERE id = :dataset_id", {"dataset_id": dataset_id})
+                print(f"Deleted from database: dataset_id={dataset_id}")
+                message += f"Deleted from database. "
     except Exception as e:
-        logger.error(f"Error deleting from database: {e}")
-        print(f"Error deleting from database: {e}")
-        errors.append(f"Database error: {str(e)}")
-        success = False
+        print(f"Database deletion error (continuing): {e}")
     
-    # 3. Delete from filesystem
-    try:
-        # Define data directory paths to check
-        data_dirs = [
-            "data",
-            "app/data",
-            os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
-        ]
-        
-        files_deleted = 0
-        # Search for all related files across possible directories
-        for data_dir in data_dirs:
-            if not os.path.exists(data_dir):
-                continue
-                
-            # File patterns to search for
-            file_patterns = [
-                f"{city_name}.csv",
-                f"reduced_{city_name.lower()}_buildings.csv",
-                f"reduced_{city_name.lower()}_buildings_*.csv",
-                f"reduced_{city_name.lower()}_buildings_all_years.csv"
-            ]
-            
-            # Find and delete matching files
-            for pattern in file_patterns:
+    # 3. Delete ALL related files from filesystem
+    files_deleted = 0
+    data_dirs = ["data", "app/data", "../data"]
+    
+    # All possible file patterns for this dataset
+    patterns = [
+        f"{city_name}.csv",
+        f"{city_name.lower()}.csv", 
+        f"{city_name.upper()}.csv",
+        f"reduced_{city_name.lower()}_buildings*.csv",
+        f"sample_{city_name.lower()}.csv",
+        f"sample_{city_name.lower().replace(' ', '-')}.csv"
+    ]
+    
+    for data_dir in data_dirs:
+        if os.path.exists(data_dir):
+            print(f"Searching in: {data_dir}")
+            for pattern in patterns:
                 file_path = os.path.join(data_dir, pattern)
                 matching_files = glob.glob(file_path)
+                print(f"Pattern '{pattern}' found: {matching_files}")
                 
                 for file in matching_files:
                     try:
                         os.remove(file)
                         files_deleted += 1
-                        logger.info(f"Deleted file: {file}")
-                        print(f"Deleted file: {file}")
+                        print(f"DELETED FILE: {file}")
                     except Exception as e:
-                        logger.error(f"Error deleting file {file}: {e}")
-                        print(f"Error deleting file {file}: {e}")
-                        errors.append(f"File error: {str(e)}")
-                        success = False
-        
-        # 4. Check ownership JSON and remove entry if exists
-        try:
-            for data_dir in data_dirs:
-                user_datasets_dir = os.path.join(data_dir, "user_datasets")
-                ownership_file = os.path.join(user_datasets_dir, "ownership.json")
-                
-                if os.path.exists(ownership_file):
-                    try:
-                        # Load ownership data
-                        with open(ownership_file, "r") as f:
-                            ownership_data = json.load(f)
-                        
-                        # Remove entry if exists
-                        if city_name in ownership_data:
-                            del ownership_data[city_name]
-                            logger.info(f"Removed {city_name} from ownership records")
-                            print(f"Removed {city_name} from ownership records")
-                            
-                            # Save updated ownership data
-                            with open(ownership_file, "w") as f:
-                                json.dump(ownership_data, f, indent=2)
-                    except Exception as e:
-                        logger.error(f"Error updating ownership data: {e}")
-                        print(f"Error updating ownership data: {e}")
-                        errors.append(f"Ownership record error: {str(e)}")
-        except Exception as e:
-            logger.error(f"Error checking ownership records: {e}")
-            print(f"Error checking ownership records: {e}")
-            
-        message += f"Deleted {files_deleted} file(s) from filesystem."
-        
-    except Exception as e:
-        logger.error(f"Error in filesystem deletion: {e}")
-        print(f"Error in filesystem deletion: {e}")
-        errors.append(f"File system error: {str(e)}")
-        success = False
+                        print(f"Error deleting {file}: {e}")
     
-    # 5. Final status message
-    if success:
-        logger.info(f"Successfully deleted dataset: {city_name}")
-        return True, message
-    else:
-        error_msg = f"Encountered errors while deleting {city_name}: {'; '.join(errors)}"
-        logger.warning(error_msg)
-        return False, error_msg
+    # 4. Remove from ownership.json
+    ownership_files = [
+        "data/user_datasets/ownership.json",
+        "app/data/user_datasets/ownership.json"
+    ]
+    
+    for ownership_file in ownership_files:
+        if os.path.exists(ownership_file):
+            try:
+                with open(ownership_file, "r") as f:
+                    ownership_data = json.load(f)
+                
+                if city_name in ownership_data:
+                    del ownership_data[city_name]
+                    with open(ownership_file, "w") as f:
+                        json.dump(ownership_data, f, indent=2)
+                    print(f"Removed from ownership: {ownership_file}")
+            except Exception as e:
+                print(f"Error updating ownership: {e}")
+    
+    message += f"Deleted {files_deleted} file(s)."
+    print(f"=== DELETE COMPLETE: {files_deleted} files deleted ===")
+    return True, message
 
 def check_and_recreate_missing_datasets():
     """

@@ -308,19 +308,6 @@ def create_audit_logs_table():
     except Exception as e:
         print(f"Failed to create audit_logs table: {str(e)}")
 
-def initialize_logging_tables():
-    """Initialize all logging tables"""
-    try:
-        create_security_logs_table()
-        create_audit_logs_table()
-    except Exception as e:
-        print(f"Failed to initialize logging tables: {str(e)}")
-
-# Legacy compatibility functions
-def log_event(event_type, username, details=None):
-    """Legacy compatibility function"""
-    log_security_event(event_type, username, details, success=True)
-
 def log_access_attempt(username, resource, success=True, details=None):
     """Log access attempts"""
     log_security_event(

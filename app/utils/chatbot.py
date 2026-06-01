@@ -24,8 +24,15 @@ except ImportError:
     GEMINI_AVAILABLE = False
 
 # Local imports
-from utils.logger import log_security_event
-from utils.auth_db import get_user_role
+try:
+    from utils.logger import log_security_event
+    from utils.auth_db import get_user_role
+except ImportError:
+    # Fallback mode - some functions may not be available
+    log_security_event = None
+    get_user_role = None
+
+from utils.memory_backends import EnhancedConversationMemory, get_memory_status_info
 
 
 class BuildingChatbot:
@@ -36,10 +43,63 @@ class BuildingChatbot:
         self.setup_gemini()
         self.initialize_session_state()
         
+        # Initialize production-ready memory system
+        self.setup_memory_system()
+        
+    def get_user_owned_datasets(self) -> List[str]:
+        """Get list of datasets owned by the current user"""
+        try:
+            username = st.session_state.get("username")
+            if not username:
+                return []
+            
+            # Load dataset ownership data
+            dataset_ownership = st.session_state.get("dataset_ownership", {})
+            if not dataset_ownership:
+                # Try to load from file
+                import json
+                import os
+                ownership_file = "data/ownership.json"
+                if os.path.exists(ownership_file):
+                    try:
+                        with open(ownership_file, 'r') as f:
+                            dataset_ownership = json.load(f)
+                        st.session_state["dataset_ownership"] = dataset_ownership
+                    except:
+                        dataset_ownership = {}
+            
+            # Filter datasets owned by current user
+            owned_datasets = []
+            for dataset_name, dataset_info in dataset_ownership.items():
+                if dataset_info.get("owner") == username:
+                    owned_datasets.append(dataset_name)
+            
+            return owned_datasets
+            
+        except Exception as e:
+            return []
+    
+    def get_available_datasets(self) -> List[str]:
+        """Get list of datasets available to the user (owned + public)"""
+        owned_datasets = self.get_user_owned_datasets()
+        
+        # Add default public datasets if user has no owned datasets
+        public_datasets = ["Auch", "Lille", "Ciry-le-Noble", "Gordes"]
+        
+        # For admin users, show all. For regular users, show owned + public if no owned datasets
+        user_role = st.session_state.get("user_role", "user")
+        if user_role == "admin":
+            return public_datasets + owned_datasets
+        elif owned_datasets:
+            return owned_datasets  # Only show owned datasets
+        else:
+            return public_datasets  # Show public datasets if no owned ones
+        
     def setup_gemini(self):
         """Setup Google Gemini configuration"""
         try:
             if not GEMINI_AVAILABLE:
+                print("❌ Gemini dependencies not available")
                 self.llm = None
                 self.pandas_agent = None
                 self.api_available = False
@@ -51,27 +111,34 @@ class BuildingChatbot:
             try:
                 if hasattr(st, 'secrets') and "gemini" in st.secrets and "api_key" in st.secrets["gemini"]:
                     api_key = st.secrets["gemini"]["api_key"]
+                    print(f"🔑 Found API key: {api_key[:20]}...")
                     if api_key and api_key.strip() and api_key != "demo-mode":
                         # Configure Gemini
                         genai.configure(api_key=api_key)
+                        print("✅ Gemini API key configured")
                         
                         # Initialize LangChain with Gemini
                         self.llm = ChatGoogleGenerativeAI(
-                            model="gemini-1.5-flash",
+                            model="gemini-2.5-flash",  # Use latest available model
                             temperature=0.1,
                             google_api_key=api_key
                         )
+                        # Set as available even if there might be rate limits later
                         self.api_available = True
+                        print(f"✅ Gemini LLM initialized successfully")
                     else:
                         # No valid API key, use demo mode
                         self.llm = None
                         self.api_available = False
+                        print(f"❌ Invalid API key: {api_key[:10]}...")
                 else:
                     # No secrets found, use demo mode
                     self.llm = None
                     self.api_available = False
+                    print("❌ No Gemini secrets found")
             except Exception as secrets_error:
-                # Secrets file not found or invalid, use demo mode
+                # Secrets file not found or invalid, but still try to create LLM
+                print(f"⚠️ Secrets error: {secrets_error}")
                 self.llm = None
                 self.api_available = False
                 
@@ -82,6 +149,38 @@ class BuildingChatbot:
             self.llm = None
             self.pandas_agent = None
             self.api_available = False
+            
+    def setup_memory_system(self):
+        """Initialize production-ready memory system"""
+        try:
+            # Get database manager if available
+            db_manager = None
+            try:
+                from utils.db_manager import get_database_manager
+                db_manager, _, db_available = get_database_manager()
+                if not db_available:
+                    db_manager = None
+            except:
+                db_manager = None
+            
+            # Initialize memory with auto-detection
+            self.memory = EnhancedConversationMemory(
+                storage_type="auto",  # Auto-detect best storage
+                db_manager=db_manager,
+                memory_size=10
+            )
+            
+            # Store memory info for UI display
+            self.memory_status = get_memory_status_info()
+            
+        except Exception as e:
+            # Fallback to simple session state if memory setup fails
+            self.memory = None
+            self.memory_status = {
+                "available_backends": {"session": True},
+                "recommended": "session", 
+                "current_storage": "fallback"
+            }
             
     def initialize_session_state(self):
         """Initialize session state variables for chatbot"""
@@ -412,29 +511,52 @@ class BuildingChatbot:
         }
 
     def process_chat_message(self, user_input: str, df: Optional[pd.DataFrame] = None) -> str:
-        """Process user chat message using AI-powered intent analysis"""
+        """Process user chat message using AI-powered intent analysis with memory"""
         
-        if not self.api_available:
-            return self.get_demo_response(user_input, df)
-            
+        # Add user message to memory
+        if self.memory:
+            self.memory.add_message(user_input, "human")
+        
         try:
-            # Use AI to analyze the query intent
-            intent_data = self.analyze_query_intent(user_input)
-            
-            # Use corrected query if available
-            processed_query = intent_data.get('spelling_corrected', user_input)
-            
-            # Route based on intent
-            if df is not None and intent_data['intent'] in ['total_count', 'class_count', 'summary', 'model_results']:
-                return self.handle_data_query_with_intent(processed_query, df, intent_data)
-            elif intent_data['intent'] in ['upload_help', 'dataset_guidance']:
-                return self.handle_upload_guidance(processed_query, intent_data)
-            else:
-                return self.handle_general_query(processed_query)
+            # ALWAYS TRY AI FIRST, regardless of api_available flag
+            if self.llm is not None:
+                # Use AI to analyze the query intent with conversation context
+                intent_data = self.analyze_query_intent_with_context(user_input)
                 
+                # Use corrected query if available
+                processed_query = intent_data.get('spelling_corrected', user_input)
+                
+                # Route based on intent - but prioritize general AI responses for model questions
+                if df is not None and intent_data['intent'] in ['total_count', 'class_count', 'summary', 'model_results']:
+                    response = self.handle_data_query_with_intent(processed_query, df, intent_data)
+                elif intent_data['intent'] in ['upload_help', 'dataset_guidance']:
+                    response = self.handle_upload_guidance(processed_query, intent_data)
+                else:
+                    # Use AI for general queries (including model explanations)
+                    response = self.handle_general_query_with_context(processed_query)
+            else:
+                # Only fall back to demo responses if AI is truly unavailable
+                response = self.get_demo_response_with_memory(user_input, df)
+            
+            # Add response to memory
+            if self.memory:
+                self.memory.add_message(response, "ai")
+                
+            return response
+            
         except Exception as e:
-            # Fallback to original method
-            return self.handle_general_query(user_input)
+            # Even in error cases, try AI one more time before complete fallback
+            try:
+                if self.llm is not None:
+                    fallback_response = self.handle_general_query_with_context(user_input)
+                else:
+                    fallback_response = self.get_demo_response_with_memory(user_input, df)
+            except:
+                fallback_response = f"⚠️ **Technical Issue**: I encountered an error processing your question about: '{user_input}'. Please try rephrasing your question or check if the AI service is available."
+            
+            if self.memory:
+                self.memory.add_message(fallback_response, "ai")
+            return fallback_response
             
     def handle_data_query_with_intent(self, query: str, df: pd.DataFrame, intent_data: Dict[str, Any]) -> str:
         """Handle data queries using AI-analyzed intent"""
@@ -760,15 +882,19 @@ I'm looking for **Class {class_mentioned}** from the **{model_mentioned.title()}
         """Handle queries about uploading datasets and user permissions"""
         try:
             # Import auth functions to check user permissions
-            from utils.auth_db import get_user_role
-            from utils.secure_auth import secure_auth
+            try:
+                from utils.auth_db import get_user_role
+                from utils.secure_auth import secure_auth
+            except ImportError:
+                # Fallback mode - auth functions not available
+                pass
             
             username = st.session_state.get('username', 'Unknown')
             user_role = st.session_state.get('user_role', 'user')
             upload_context = intent_data.get('upload_context', 'general')
             
-            # Check if user has upload permission
-            has_upload_permission = secure_auth.check_permission('upload_datasets')
+            # Check if user has upload permission - everyone can upload
+            has_upload_permission = True  # Everyone can upload datasets now
             
             if upload_context == 'permissions':
                 if has_upload_permission:
@@ -884,14 +1010,16 @@ Your current role ({user_role}) doesn't have upload permissions. Contact your ad
                 else:
                     return """ℹ️ **Dataset Upload Information**
 
-Dataset upload is available for users with analyst or admin roles. Your current role doesn't include upload permissions.
+✅ **Everyone can upload datasets!** 
 
-**Available Options**:
-- Analyze existing city datasets (Auch, Lille, Ciry-le-Noble)
-- Use all machine learning models
-- Generate reports and comparisons
+**Available Options:**
+- 📤 Upload your own custom building datasets
+- 📊 Analyze your uploaded datasets with all ML models
+- 📈 Generate reports and comparisons from your data
 
-**To get upload access**: Contact your administrator to upgrade your role to analyst or admin."""
+**To upload**: Look for "Upload Custom Dataset" in the dataset selection dropdown.
+
+**File Requirements**: CSV format, building data with coordinates and attributes."""
                     
         except Exception as e:
             # Fallback response if auth checking fails
@@ -920,12 +1048,24 @@ For detailed guidance, please specify what you'd like to know:
     def handle_general_query(self, query: str) -> str:
         """Handle general queries about the application"""
         try:
+            # Create a comprehensive system message for building analytics context
+            system_content = f"""You are an expert AI assistant for a Building Analytics Dashboard. {self.get_app_context()}
+
+You specialize in:
+- Building performance analysis and energy efficiency
+- Multi-criteria decision analysis (TOPSIS, PCA, Mahalanobis distance, etc.)
+- Data science and machine learning for building analytics
+- Sustainability metrics and environmental impact assessment
+- Building renovation and investment decision support
+
+Provide detailed, accurate, and helpful responses. When discussing technical concepts like TOPSIS, PCA, or other algorithms, explain them thoroughly with mathematical details when requested."""
+
             messages = [
-                SystemMessage(content=f"You are a helpful assistant for a Building Analytics Dashboard. {self.get_app_context()}"),
+                SystemMessage(content=system_content),
                 HumanMessage(content=query)
             ]
             
-            response = self.llm(messages)
+            response = self.llm.invoke(messages)
             return response.content
             
         except Exception as e:
@@ -1083,288 +1223,727 @@ I'm looking for **Class {class_mentioned}** from **{model_mentioned.title()}** c
         
         query_lower = query.lower()
         
-        # General ML model explanations
-        if any(word in query_lower for word in ['pca', 'principal']):
-            return """**PCA (Principal Component Analysis)** reduces the dimensionality of your building data while preserving the most important variations. 
+        # For any model explanation questions, redirect to AI or provide notice
+        model_keywords = ['pca', 'principal', 'mahalanobis', 'topsis', 'tree', 'decision', 'cosine', 'similarity', 'weighted', 'scoring']
+        if any(keyword in query_lower for keyword in model_keywords):
+            return f"""⚠️ **Enhanced AI Response Needed**
 
-**How it works:**
-- Finds the main patterns in your building data
-- Reduces complex multi-dimensional data to fewer dimensions
-- Helps identify which building features are most important
-- Great for visualizing building clusters and detecting patterns
+I've detected you're asking about machine learning models. For detailed, comprehensive explanations, the system needs AI capability.
 
-**Use case:** Perfect when you have many building features and want to understand which ones matter most for classification."""
-            
-        elif any(word in query_lower for word in ['mahalanobis']):
-            return """**Mahalanobis Distance** measures how unusual a building is compared to the typical building in your dataset.
+**Your Question**: {query}
 
-**How it works:**
-- Calculates statistical distance accounting for correlations between variables
-- Identifies outlier buildings that don't fit normal patterns
-- Considers how building features relate to each other
-- Excellent for detecting unusual or problematic buildings
+**To get detailed AI-generated responses:**
+1. The system will attempt to use AI if properly configured
+2. If AI is unavailable, you'll see this message
 
-**Use case:** Ideal for finding buildings that need special attention or have unusual consumption patterns."""
-            
-        elif any(word in query_lower for word in ['topsis']):
-            return """**TOPSIS (Technique for Order Preference by Similarity to Ideal Solution)** ranks buildings by comparing them to ideal and worst-case scenarios.
+**What you'll get with AI:**
+- Detailed mathematical explanations
+- Step-by-step algorithms  
+- Practical examples for building analytics
+- Customized responses to your specific questions
 
-**How it works:**
-- Defines an ideal building (best in all criteria)
-- Defines a worst building (worst in all criteria)  
-- Ranks buildings by how close they are to ideal vs worst
-- Provides clear ranking from best to worst buildings
+💡 **This is much better than predefined static responses!**"""
+        
+        # For general questions, provide basic help
+        return """👋 **Hello! I'm your Building Analytics Assistant**
 
-**Use case:** Perfect when you need to rank buildings for investment, renovation priority, or performance comparison."""
-            
-        elif any(word in query_lower for word in ['weighted']):
-            return """**Weighted Scoring** allows you to assign custom importance to different building criteria based on your priorities.
-
-**How it works:**
-- You define importance weights (e.g., 40% energy efficiency, 30% cost, 30% location)
-- Each building gets scored based on your custom weights
-- Buildings that excel in your priority areas score higher
-- Fully customizable to match your specific needs
-
-**Use case:** Ideal when you have specific priorities and want results tailored to your criteria."""
-            
-        elif any(word in query_lower for word in ['cosine', 'similarity']):
-            return """**Cosine Similarity** measures how similar buildings are based on their feature patterns.
-
-**How it works:**
-- Treats each building as a vector in multi-dimensional space
-- Calculates the angle between building vectors
-- Similar buildings have small angles (high cosine similarity)
-- Different buildings have large angles (low cosine similarity)
-
-**Use case:** Great for finding buildings with similar characteristics or grouping buildings by similarity."""
-            
-        elif any(word in query_lower for word in ['tree', 'decision']):
-            return """**Tree Classifier** uses decision tree logic to classify buildings into performance categories.
-
-**How it works:**
-- Creates a series of yes/no questions about building features
-- Follows decision paths to classify each building
-- Easy to understand and interpret the classification logic
-- Handles both numerical and categorical building data
-
-**Use case:** Perfect when you need explainable classifications and want to understand the decision process."""
-            
-        elif any(word in query_lower for word in ['help', 'what can', 'capabilities']):
-            return """**I can help you with:**
-
-🏢 **Building Analysis Models:**
-- PCA, TOPSIS, Mahalanobis Distance, Weighted Scoring
-- Cosine Similarity, Tree Classification
-- Model comparisons and recommendations
-
-📊 **Data Analysis:**
-- Dataset summaries and statistics
-- Feature explanations and relationships
-- Building performance insights
-
-📤 **Dataset Upload:**
-- Upload guidance and requirements
-- Permission checking
-- Step-by-step instructions
-
-🎓 **Learning:**
-- Machine learning concept explanations
-- Building analytics best practices
-- Feature interpretation guidance
-
-**Try asking me:** "Explain PCA", "What's the best model for ranking buildings?", "How do I upload my dataset?", "Summarize my dataset", or "Do I have upload permissions?"
-"""
-            
-        elif df is not None and any(word in query_lower for word in ['data', 'dataset', 'summary']):
-            return self.get_dataset_summary(df)
-            
-        elif any(word in query_lower for word in ['best', 'recommend', 'which model']):
-            return """**Model Recommendations by Use Case:**
-
-🏆 **Ranking Buildings:** TOPSIS or Weighted Scoring
-- Clear rankings from best to worst
-- Customizable to your priorities
-
-🔍 **Finding Outliers:** Mahalanobis Distance
-- Identifies unusual buildings that need attention
-- Great for quality control
-
-📊 **Understanding Patterns:** PCA
-- Reveals hidden patterns in your data
-- Shows which features matter most
-
-⚖️ **Custom Priorities:** Weighted Scoring
-- Tailor results to your specific criteria
-- Perfect for decision-making
-
-🔗 **Finding Similar Buildings:** Cosine Similarity
-- Groups buildings by similarity
-- Good for benchmarking
-
-**What's your main goal?** I can provide more specific guidance!"""
-            
-        else:
-            return """**Welcome to the Building Analytics Assistant!** 🏢
-
-I'm here to help you understand building performance analysis and machine learning models.
+I can help you with:
+- **Building performance analysis** and energy efficiency insights
+- **Machine learning models** for classification and ranking  
+- **Dataset analysis** and statistical summaries
+- **Upload guidance** for custom datasets
 
 **Popular topics:**
-- "How do I upload my dataset?" - Learn about custom data upload
-- "Explain PCA" - Learn about dimensionality reduction
-- "What's TOPSIS?" - Understand ranking methodology  
-- "How does Mahalanobis work?" - Discover outlier detection
-- "Which model should I use?" - Get personalized recommendations
-- "Summarize my dataset" - Get data insights
+- "What's TOPSIS?" or "Explain PCA math"
+- "How many buildings are in this dataset?"
+- "Can I upload my own data?"
+- "Compare different ranking methods"
 
-**Ask me anything about building analytics, ML models, data upload, or your data!**"""
-            
+Ask me anything about building analytics! 🏢📊"""
+
     def render_chat_interface(self, df: Optional[pd.DataFrame] = None):
-        """Render the chat interface"""
-        # Set a flag to indicate we're in the chatbot
-        st.session_state._chatbot_active = True
+        """Render the chat interface with improved layout"""
+        # Set a flag to indicate we're in the chatbot (but don't interfere with auth)
+        # st.session_state._chatbot_active = True  # Removed to prevent session interference
         
-        st.subheader("🤖 Building Analytics Assistant")
-        st.caption("Powered by Google Gemini 🚀")
+        st.markdown("### 🤖 Building Analytics Assistant")
+        st.markdown("*Powered by Google Gemini 2.5 Flash* ⚡")
         
-        if not GEMINI_AVAILABLE:
-            st.error("❌ **Missing Dependencies**: Please install Google Gemini dependencies:")
-            st.code("pip install google-generativeai langchain-google-genai", language="bash")
-            st.info("After installation, restart the application.")
-            return
+        # Status indicators
+        col1, col2, col3 = st.columns([2, 1, 1])
         
-        if not self.api_available:
-            st.info("💡 **Demo Mode**: The chatbot is running with limited functionality. To enable full AI capabilities:")
-            with st.expander("How to enable FREE Google Gemini AI functionality"):
-                st.markdown("""
-                1. **Get a FREE Google Gemini API key** from [Google AI Studio](https://aistudio.google.com/app/apikey)
-                   - No credit card required!
-                   - Generous free tier with high rate limits
-                   
-                2. **Configure the API key**:
-                   - Edit the `.streamlit/secrets.toml` file in the app directory
-                   - Replace `api_key = "demo-mode"` with your actual API key:
-                   ```toml
-                   [gemini]
-                   api_key = "your-gemini-api-key-here"
-                   ```
-                   
-                3. **Restart the application**
-                
-                **Current capabilities in demo mode:**
-                - Basic explanations of ML models (PCA, TOPSIS, Mahalanobis, etc.)
-                - Dataset summaries and basic analysis
-                - Feature explanations
-                """)
-        else:
-            st.success("🚀 **Full AI Mode**: Advanced chatbot functionality enabled with Google Gemini!")
-            
-        # Dataset status
-        if df is not None:
-            st.success(f"📊 Dataset loaded: {df.shape[0]} buildings, {df.shape[1]} attributes")
-            st.session_state.chatbot_dataset = df
-        else:
-            st.info("📋 No dataset loaded. Upload data for dataset-specific analysis.")
-            
-        # Chat mode selector
-        col1, col2 = st.columns(2)
         with col1:
-            chat_mode = st.selectbox(
-                "Chat Mode",
-                ["general", "data_analysis", "feature_explanation"],
-                format_func=lambda x: {
-                    "general": "🗣️ General Questions",
-                    "data_analysis": "📊 Data Analysis", 
-                    "feature_explanation": "🎓 Feature Explanation"
-                }[x]
-            )
-            st.session_state.chatbot_mode = chat_mode
-            
-        with col2:
-            if st.button("🗑️ Clear Chat"):
-                st.session_state.chatbot_messages = []
-                # Don't use st.rerun() to avoid tab switching
+            if not GEMINI_AVAILABLE:
+                st.error("❌ **Missing Dependencies**: Please install Google Gemini dependencies:")
+                st.code("pip install google-generativeai langchain-google-genai", language="bash")
+                st.info("After installation, restart the application.")
+                return
+            elif not self.api_available:
+                st.warning("⚠️ **Demo Mode**: Configure API key for full AI capabilities")
+            else:
+                st.success("🚀 **AI Mode Active**: Real-time intelligent responses enabled!")
         
-        # Display chat history
-        for message in st.session_state.chatbot_messages:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
+        with col2:
+            # Dataset status
+            if df is not None:
+                st.metric("📊 Dataset", f"{df.shape[0]} buildings")
+                st.session_state.chatbot_dataset = df
+            else:
+                st.info("📋 No dataset loaded")
                 
-                # Display chart if present
-                if "chart" in message:
-                    st.plotly_chart(message["chart"], use_container_width=True)
+        with col3:
+            # Clear chat button
+            if st.button("🗑️ Clear Chat", use_container_width=True):
+                st.session_state.chatbot_messages = []
+                st.rerun()
+        
+        # Chat mode selector with better styling
+        st.markdown("---")
+        chat_mode = st.selectbox(
+            "💬 **Choose Chat Mode**",
+            ["general", "data_analysis", "feature_explanation"],
+            format_func=lambda x: {
+                "general": "🗣️ General Questions & Model Explanations",
+                "data_analysis": "📊 Data Analysis & Insights", 
+                "feature_explanation": "🎓 Feature & Algorithm Details"
+            }[x],
+            help="Select the type of assistance you need"
+        )
+        st.session_state.chatbot_mode = chat_mode
+        
+        # Chat container with better styling
+        st.markdown("---")
+        
+        # Initialize chat history
+        if "chatbot_messages" not in st.session_state:
+            st.session_state.chatbot_messages = []
+            # Add welcome message
+            welcome_msg = """👋 **Welcome to the Building Analytics Assistant!**
+
+I'm here to help you understand:
+• **Machine Learning Models** (TOPSIS, PCA, Mahalanobis, etc.)
+• **Building Performance Analysis** 
+• **Dataset Insights & Statistics**
+• **Feature Explanations**
+
+**Try asking:**
+• "What's TOPSIS and how does it work?"
+• "Explain PCA mathematics"
+• "How does Mahalanobis distance detect outliers?"
+• "Show me dataset summary"
+
+**What would you like to know?** 🤔"""
+            
+            st.session_state.chatbot_messages.append({
+                "role": "assistant", 
+                "content": welcome_msg
+            })
+
+        # Chat messages container with improved styling
+        chat_container = st.container()
+        
+        with chat_container:
+            # Display chat history with better formatting
+            for i, message in enumerate(st.session_state.chatbot_messages):
+                if message["role"] == "user":
+                    # User question with distinctive styling
+                    st.markdown(
+                        f"""<div style="background-color: #e3f2fd; padding: 15px; border-radius: 10px; margin: 10px 0; border-left: 4px solid #2196f3;">
+                        <strong>🙋‍♂️ Your Question:</strong><br>
+                        {message["content"]}
+                        </div>""", 
+                        unsafe_allow_html=True
+                    )
+                else:
+                    # Assistant answer with distinctive styling
+                    st.markdown(
+                        f"""<div style="background-color: #f1f8e9; padding: 15px; border-radius: 10px; margin: 10px 0; border-left: 4px solid #4caf50;">
+                        <strong>🤖 AI Assistant:</strong>
+                        </div>""", 
+                        unsafe_allow_html=True
+                    )
+                    st.markdown(message["content"])
+                    
+                    # Display chart if present
+                    if "chart" in message:
+                        st.plotly_chart(message["chart"], use_container_width=True)
+                    
+                    # Add a subtle separator after each answer
+                    if i < len(st.session_state.chatbot_messages) - 1:
+                        st.markdown("---")
+        
+        # Chat input section with better styling
+        st.markdown("---")
+        st.markdown("### 💭 Ask Your Question")
+        
+        # Quick example buttons
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("🎯 What's TOPSIS?", use_container_width=True):
+                st.session_state.pending_chat_message = "What is TOPSIS and how does it work mathematically?"
+        
+        with col2:
+            if st.button("📊 Explain PCA", use_container_width=True):
+                st.session_state.pending_chat_message = "Explain Principal Component Analysis (PCA) with mathematical details"
+        
+        with col3:
+            if st.button("🔍 Mahalanobis Distance", use_container_width=True):
+                st.session_state.pending_chat_message = "How does Mahalanobis distance work for outlier detection?"
         
         # Check for pending message from example buttons
         if st.session_state.get('pending_chat_message'):
             prompt = st.session_state.pending_chat_message
             del st.session_state['pending_chat_message']  # Clear the pending message
             
-            # Process the example question
-            st.session_state.chatbot_messages.append({"role": "user", "content": prompt})
-            
-            with st.chat_message("user"):
-                st.markdown(prompt)
-            
-            with st.chat_message("assistant"):
-                with st.spinner("Thinking..."):
-                    response = self.process_chat_message(prompt, df)
-                    st.markdown(response)
-                    st.session_state.chatbot_messages.append({"role": "assistant", "content": response})
-                    
-            # Log the interaction
-            if "username" in st.session_state:
-                log_security_event(
-                    event_type="chatbot_interaction",
-                    username=st.session_state.username,
-                    details={"query": prompt, "mode": st.session_state.get('chatbot_mode', 'general')},
-                    success=True
-                )
+            # Process the example question immediately
+            self._process_user_message(prompt, df, chat_mode)
         
-        # Chat input
-        if prompt := st.chat_input("Ask me anything about the dashboard or your data...", key="ai_assistant_chat_input"):
-            # Add user message
-            st.session_state.chatbot_messages.append({"role": "user", "content": prompt})
-            
-            with st.chat_message("user"):
-                st.markdown(prompt)
-            
-            # Generate response
-            with st.chat_message("assistant"):
-                with st.spinner("Thinking..."):
-                    response = self.process_chat_message(prompt, df)
-                    st.markdown(response)
-                    
-                    # Try to generate chart if requested
-                    if df is not None and any(word in prompt.lower() for word in ['chart', 'plot', 'show', 'visualize']):
-                        chart = self.generate_chart_from_query(df, prompt)
-                        if chart:
-                            st.plotly_chart(chart, use_container_width=True)
-                            st.session_state.chatbot_messages.append({
-                                "role": "assistant", 
-                                "content": response,
-                                "chart": chart
-                            })
-                        else:
-                            st.session_state.chatbot_messages.append({"role": "assistant", "content": response})
-                    else:
-                        st.session_state.chatbot_messages.append({"role": "assistant", "content": response})
-            
-            # Log chat interaction
-            if "username" in st.session_state:
+        # Main chat input with enhanced styling
+        st.markdown("### ✍️ Type your question here:")
+        
+        if prompt := st.chat_input(
+            "💡 Ask me anything about building analytics, ML models, or your data...", 
+            key="ai_assistant_chat_input"
+        ):
+            # Process the user's message
+            self._process_user_message(prompt, df, chat_mode)
+
+    def _process_user_message(self, prompt: str, df: Optional[pd.DataFrame], chat_mode: str):
+        """Process a user message and generate response"""
+        # Add user message with styling
+        st.session_state.chatbot_messages.append({"role": "user", "content": prompt})
+        
+        # Show user message immediately
+        st.markdown(
+            f"""<div style="background-color: #e3f2fd; padding: 15px; border-radius: 10px; margin: 10px 0; border-left: 4px solid #2196f3;">
+            <strong>🙋‍♂️ Your Question:</strong><br>
+            {prompt}
+            </div>""", 
+            unsafe_allow_html=True
+        )
+        
+        # Generate and show response
+        with st.spinner("🤖 AI is thinking..."):
+            response = self.process_chat_message(prompt, df)
+        
+        # Show assistant response with styling
+        st.markdown(
+            f"""<div style="background-color: #f1f8e9; padding: 15px; border-radius: 10px; margin: 10px 0; border-left: 4px solid #4caf50;">
+            <strong>🤖 AI Assistant:</strong>
+            </div>""", 
+            unsafe_allow_html=True
+        )
+        st.markdown(response)
+        
+        # Try to generate chart if requested
+        chart = None
+        if df is not None and any(word in prompt.lower() for word in ['chart', 'plot', 'show', 'visualize']):
+            chart = self.generate_chart_from_query(df, prompt)
+            if chart:
+                st.plotly_chart(chart, use_container_width=True)
+        
+        # Add response to chat history
+        if chart:
+            st.session_state.chatbot_messages.append({
+                "role": "assistant", 
+                "content": response,
+                "chart": chart
+            })
+        else:
+            st.session_state.chatbot_messages.append({"role": "assistant", "content": response})
+        
+        # Add separator
+        st.markdown("---")
+        
+        # Log chat interaction
+        if "username" in st.session_state and log_security_event:
+            try:
                 log_security_event(
                     event_type="chatbot_interaction",
                     username=st.session_state.username,
                     details={"query": prompt, "mode": chat_mode},
                     success=True
                 )
+            except (NameError, ImportError):
+                # log_security_event not available in fallback mode
+                pass
+        
+        # Rerun to update the interface
+        st.rerun()
+
+    def analyze_query_intent_with_context(self, user_input: str) -> Dict[str, Any]:
+        """Analyze query intent with conversation context"""
+        if not self.memory:
+            return self.analyze_query_intent(user_input)
+        
+        try:
+            # Get conversation context
+            context = self.memory.get_context_summary()
+            recent_messages = self.memory.get_conversation_history()[-4:]  # Last 4 messages
+            
+            # Build context for the AI
+            context_prompt = f"""
+            Previous conversation context: {context}
+            
+            Recent messages:
+            """
+            
+            for msg in recent_messages:
+                role = "User" if msg["type"] == "human" else "Assistant"
+                context_prompt += f"{role}: {msg['content'][:100]}...\n"
+            
+            enhanced_prompt = f"""
+            {context_prompt}
+            
+            Current user query: "{user_input}"
+            
+            Analyze this query considering the conversation context above.
+            """
+            
+            return self.analyze_query_intent(enhanced_prompt)
+            
+        except Exception:
+            # Fallback to basic analysis
+            return self.analyze_query_intent(user_input)
+    
+    def perform_data_analysis(self, query: str, city_name: str) -> str:
+        """Perform actual data analysis for specific queries"""
+        try:
+            # Import data processing here to avoid circular imports
+            from data.data_processing import get_data_for_city
+            
+            query_lower = query.lower()
+            
+            # Load the actual data
+            data = get_data_for_city(city_name)
+            if data is None or data.empty:
+                return f"❌ **No data available for {city_name}**\n\nPlease check if the dataset is properly loaded."
+            
+            # Perform specific analysis based on query
+            if any(keyword in query_lower for keyword in ["average", "mean"]) and any(keyword in query_lower for keyword in ["co2", "carbon", "emission"]):
+                # Calculate average CO2 usage
+                co2_columns = [col for col in data.columns if 'co2' in col.lower() or 'carbon' in col.lower() or 'emission' in col.lower()]
+                if co2_columns:
+                    avg_co2 = data[co2_columns[0]].mean()
+                    return f"""📊 **CO2 Analysis for {city_name}**
+                    
+**Average CO2 Usage:** {avg_co2:.1f} kg/year
+**Total Buildings Analyzed:** {len(data)}
+**CO2 Range:** {data[co2_columns[0]].min():.1f} - {data[co2_columns[0]].max():.1f} kg/year
+
+💡 **Insights:**
+- Buildings with lowest CO2: {data[co2_columns[0]].min():.1f} kg/year
+- Buildings with highest CO2: {data[co2_columns[0]].max():.1f} kg/year
+- Standard deviation: {data[co2_columns[0]].std():.1f} kg/year"""
+                
+            elif any(keyword in query_lower for keyword in ["average", "mean"]) and any(keyword in query_lower for keyword in ["energy", "consumption"]):
+                # Calculate average energy usage
+                energy_columns = [col for col in data.columns if 'energy' in col.lower() or 'consumption' in col.lower()]
+                if energy_columns:
+                    avg_energy = data[energy_columns[0]].mean()
+                    return f"""⚡ **Energy Analysis for {city_name}**
+                    
+**Average Energy Usage:** {avg_energy:.1f} kWh/year
+**Total Buildings Analyzed:** {len(data)}
+**Energy Range:** {data[energy_columns[0]].min():.1f} - {data[energy_columns[0]].max():.1f} kWh/year"""
+                
+            elif any(keyword in query_lower for keyword in ["how many", "count", "number"]) and "class" in query_lower:
+                # Count buildings by energy class
+                class_columns = [col for col in data.columns if 'class' in col.lower() or 'label' in col.lower()]
+                if class_columns:
+                    class_counts = data[class_columns[0]].value_counts()
+                    result = f"🏗️ **Building Classification for {city_name}**\n\n"
+                    for class_name, count in class_counts.items():
+                        result += f"**Class {class_name}:** {count} buildings\n"
+                    result += f"\n**Total Buildings:** {len(data)}"
+                    return result
+                    
+            elif any(keyword in query_lower for keyword in ["distribution", "breakdown"]):
+                # Show distribution analysis
+                class_columns = [col for col in data.columns if 'class' in col.lower() or 'label' in col.lower()]
+                if class_columns:
+                    class_counts = data[class_columns[0]].value_counts()
+                    total = len(data)
+                    result = f"📊 **Distribution Analysis for {city_name}**\n\n"
+                    for class_name, count in class_counts.items():
+                        percentage = (count / total) * 100
+                        result += f"**Class {class_name}:** {count} buildings ({percentage:.1f}%)\n"
+                    return result
+                    
+            # If no specific analysis matched, provide general stats
+            return f"""📈 **General Statistics for {city_name}**
+            
+**Total Buildings:** {len(data)}
+**Dataset Columns:** {len(data.columns)}
+**Data Shape:** {len(data)} rows × {len(data.columns)} columns
+
+💡 **Available Analysis:**
+- Energy consumption statistics
+- CO2 emissions analysis  
+- Building classification breakdown
+- Water usage insights
+
+**Try asking:** "What's the average CO2 usage?" or "Show me the energy distribution"
+"""
+            
+        except Exception as e:
+            return f"❌ **Analysis Error**\n\nSorry, I couldn't analyze the data for {city_name}. Error: {str(e)}"
+    
+    def handle_general_query_with_context(self, query: str) -> str:
+        """Handle general queries with conversation memory"""
+        if not self.memory:
+            return self.handle_general_query(query)
+        
+        # Get conversation context
+        context = self.memory.get_context_summary()
+        recent_history = self.memory.get_conversation_history()[-4:]
+        
+        query_lower = query.lower()
+        
+        # Handle specific city requests
+        if any(city in query_lower for city in ["auch", "lille", "ciry", "gordes"]):
+            city_name = None
+            if "auch" in query_lower:
+                city_name = "Auch"
+            elif "lille" in query_lower:
+                city_name = "Lille"
+            elif "ciry" in query_lower:
+                city_name = "Ciry-le-Noble"
+            elif "gordes" in query_lower:
+                city_name = "Gordes"
+                
+            if city_name:
+                # Check if user has access to this dataset
+                available_datasets = self.get_available_datasets()
+                
+                if city_name in available_datasets:
+                    # Check if this is an analytical query that needs actual data processing
+                    analytical_keywords = ["average", "mean", "how many", "count", "total", "distribution", "breakdown", "analyze", "statistics", "stats"]
+                    
+                    if any(keyword in query_lower for keyword in analytical_keywords):
+                        # Perform actual data analysis instead of showing template
+                        return self.perform_data_analysis(query, city_name)
+                    
+                    # Otherwise show the template for general city requests
+                    context_intro = ""
+                    if recent_history:
+                        context_intro = f"Based on our conversation, let me help you with {city_name}. "
+                    
+                    return f"""{context_intro}🏢 **{city_name} Dataset Analysis**
+
+I can help you analyze the {city_name} building dataset. Here's what I can do:
+
+📊 **Available Analysis:**
+- Building count and distribution by energy class
+- Energy consumption patterns and statistics  
+- CO2 emissions analysis
+- Water usage insights
+- Performance comparisons and rankings
+
+🔍 **Example Questions for {city_name}:**
+- "How many buildings are in {city_name}?"
+- "Show me the energy distribution for {city_name}"
+- "What's the average CO2 usage in {city_name}?"
+- "Find the most efficient buildings in {city_name}"
+- "Compare {city_name} building classes"
+
+**What specific analysis would you like me to perform on the {city_name} dataset?**"""
+                
+                else:
+                    # User doesn't have access to this dataset
+                    owned_datasets = self.get_user_owned_datasets()
+                    if owned_datasets:
+                        datasets_list = ', '.join(owned_datasets)
+                        return f"""❌ **{city_name} Dataset Not Available**
+
+You don't currently have access to the {city_name} dataset.
+
+**Your Available Datasets:** {datasets_list}
+
+**Options:**
+- Analyze your uploaded datasets
+- Upload a new dataset with {city_name} buildings
+- Ask an administrator for access to public datasets
+
+**Would you like to analyze one of your available datasets instead?**"""
+                    else:
+                        return f"""❌ **{city_name} Dataset Not Available**
+
+You don't currently have access to the {city_name} dataset.
+
+**To analyze building data:**
+1. **Upload your own dataset** using "Upload Custom Dataset"
+2. **Contact administrator** for access to public datasets
+
+**Would you like help uploading your own building data?**"""
+        
+        # Handle dataset summary requests
+        if any(phrase in query_lower for phrase in ["summarize", "summary", "overview", "describe", "analyze"]):
+            if any(phrase in query_lower for phrase in ["dataset", "data", "buildings"]):
+                context_intro = ""
+                if recent_history:
+                    context_intro = "Continuing our data analysis discussion, "
+                
+                # Get user's available datasets
+                available_datasets = self.get_available_datasets()
+                owned_datasets = self.get_user_owned_datasets()
+                
+                datasets_text = ""
+                if owned_datasets:
+                    datasets_text = f"**Your Datasets:** {', '.join(owned_datasets)}"
+                    if len(available_datasets) > len(owned_datasets):
+                        public_datasets = [d for d in available_datasets if d not in owned_datasets]
+                        datasets_text += f"\n**Public Datasets:** {', '.join(public_datasets)}"
+                else:
+                    datasets_text = f"**Available Datasets:** {', '.join(available_datasets)}"
+                
+                return f"""{context_intro}📊 **Dataset Summary Request**
+
+I can provide detailed summaries of your available building datasets including:
+
+🏗️ **Building Statistics:**
+- Total building count and distribution
+- Energy efficiency class breakdown (A-F)
+- Performance statistics and ranges
+
+📈 **Analysis Options:**
+- Energy consumption patterns
+- CO2 emissions analysis
+- Water usage insights
+- Efficiency comparisons
+
+{datasets_text}
+
+**To get a summary:**
+1. **Select a dataset** from the sidebar dropdown
+2. **Then ask:** "Summarize this dataset" or "Tell me about these buildings"
+
+**Which dataset would you like me to analyze?**"""
+        
+        # Check for follow-up questions
+        if any(phrase in query_lower for phrase in ["more about", "tell me more", "explain further", "continue"]):
+            # This is likely a follow-up question
+            for msg in reversed(recent_history):
+                if msg["type"] == "ai":
+                    last_topic = msg["content"][:200].lower()
+                    if "energy" in last_topic:
+                        return "I can provide more details about energy analysis. What specific aspect would you like to explore?"
+                    elif "classification" in last_topic:
+                        return "I can explain more about building classification methods. Which model interests you most?"
+                    elif "co2" in last_topic:
+                        return "I can dive deeper into CO2 emissions analysis. Would you like to see correlations or reduction strategies?"
+                    break
+        
+        # Regular handling - but don't add redundant context intro
+        base_response = self.handle_general_query(query)
+        
+        # Only add context if it's not the default welcome message
+        if "Welcome to the Building Analytics Assistant" not in base_response and context != "No previous conversation context.":
+            # Don't add context intro if the base response already handles the query well
+            return base_response
+        
+        return base_response
+    
+    def get_demo_response_with_memory(self, user_input: str, df: Optional[pd.DataFrame] = None) -> str:
+        """Get demo response with conversation memory"""
+        if not self.memory:
+            return self.get_demo_response(user_input, df)
+        
+        query_lower = user_input.lower()
+        
+        # Handle specific city requests with memory context
+        if any(city in query_lower for city in ["auch", "lille", "ciry", "gordes"]):
+            city_name = None
+            if "auch" in query_lower:
+                city_name = "Auch"
+            elif "lille" in query_lower:
+                city_name = "Lille"
+            elif "ciry" in query_lower:
+                city_name = "Ciry-le-Noble"
+            elif "gordes" in query_lower:
+                city_name = "Gordes"
+                
+            if city_name:
+                # Check if user has access to this dataset
+                available_datasets = self.get_available_datasets()
+                
+                if city_name in available_datasets:
+                    # Check if this is an analytical query that needs actual data processing
+                    analytical_keywords = ["average", "mean", "how many", "count", "total", "distribution", "breakdown", "analyze", "statistics", "stats"]
+                    
+                    if any(keyword in query_lower for keyword in analytical_keywords):
+                        # Perform actual data analysis instead of showing template
+                        return self.perform_data_analysis(user_input, city_name)
+                    
+                    # Otherwise show the template for general city requests
+                    return f"""🏢 **{city_name} Dataset Analysis**
+
+I can help you analyze the {city_name} building dataset! Here's what I can show you:
+
+📊 **Available for {city_name}:**
+- Building energy efficiency classes (A, B, C, D, E, F)
+- Energy consumption statistics and patterns
+- CO2 emissions analysis and trends
+- Water usage insights and comparisons
+- Building performance rankings
+
+🔍 **Try asking:**
+- "How many buildings are in {city_name}?"
+- "Show me the energy classes for {city_name}"
+- "What's the average energy consumption in {city_name}?"
+- "Find the most efficient buildings in {city_name}"
+
+**First, make sure to select "{city_name}" from the dataset dropdown in the sidebar, then ask your specific question!**"""
+                
+                else:
+                    # User doesn't have access
+                    owned_datasets = self.get_user_owned_datasets()
+                    if owned_datasets:
+                        return f"""❌ **{city_name} Not Available to You**
+
+You don't have access to the {city_name} dataset.
+
+**Your Available Datasets:** {', '.join(owned_datasets)}
+
+**To analyze {city_name} data:**
+- Upload your own {city_name} building dataset
+- Contact administrator for public dataset access
+
+**Would you like to work with your available datasets instead?**"""
+                    else:
+                        return f"""❌ **{city_name} Not Available**
+
+You don't have access to the {city_name} dataset.
+
+**To analyze building data:**
+1. Upload your own dataset with building information
+2. Contact administrator for access to public datasets
+
+**Would you like help uploading your own data?**"""
+        
+        # Handle dataset summary with memory
+        if any(phrase in query_lower for phrase in ["summarize", "summary", "dataset"]):
+            # Get user's available datasets
+            available_datasets = self.get_available_datasets()
+            owned_datasets = self.get_user_owned_datasets()
+            
+            datasets_info = ""
+            if owned_datasets:
+                datasets_info = f"\n\n**Your Uploaded Datasets:** {', '.join(owned_datasets)}"
+                if len(available_datasets) > len(owned_datasets):
+                    public_datasets = [d for d in available_datasets if d not in owned_datasets]
+                    datasets_info += f"\n**Available Public Datasets:** {', '.join(public_datasets)}"
+            else:
+                datasets_info = f"\n\n**Available Datasets:** {', '.join(available_datasets)}"
+            
+            return f"""📊 **Dataset Summary Available**
+
+I can provide comprehensive dataset summaries including:
+
+🏗️ **Building Metrics:**
+- Total building count and distribution
+- Energy efficiency class breakdown (A-F)
+- Performance statistics and ranges
+
+📈 **Analysis Options:**
+- Energy consumption patterns
+- CO2 emissions distribution  
+- Water usage insights
+- Efficiency comparisons
+
+{datasets_info}
+
+**To get a summary:**
+1. Select a dataset from the sidebar dropdown
+2. Ask: "Summarize this dataset" or "Tell me about these buildings"
+
+**Which dataset would you like me to analyze?**"""
+        
+        # Get base response but avoid adding redundant context
+        base_response = self.get_demo_response(user_input, df)
+        
+        # Only add memory context if it's useful
+        context = self.memory.get_context_summary()
+        if (context != "No previous conversation context." and 
+            "Welcome to the Building Analytics Assistant" not in base_response):
+            return f"Building on our conversation, {base_response[0].lower()}{base_response[1:]}"
+        
+        return base_response
+    
+    def get_memory_info(self) -> Dict[str, Any]:
+        """Get memory system information for UI display"""
+        if not self.memory:
+            return {"status": "disabled", "backend": "none"}
+        
+        history_count = len(self.memory.get_conversation_history())
+        
+        return {
+            "status": "enabled",
+            "backend": self.memory_status.get("current_storage", "unknown"),
+            "message_count": history_count,
+            "context": self.memory.get_context_summary(),
+            "available_backends": self.memory_status.get("available_backends", {}),
+            "recommended": self.memory_status.get("recommended", "session")
+        }
+    
+    def clear_conversation_memory(self):
+        """Clear conversation memory"""
+        if self.memory:
+            self.memory.clear_conversation()
+        
+        # Also clear session state messages
+        if "chatbot_messages" in st.session_state:
+            st.session_state.chatbot_messages = []
 
 
 def render_chatbot_tab(current_df: Optional[pd.DataFrame] = None):
-    """Render the chatbot as a tab in the main application"""
+    """Render the chatbot as a tab in the main application with enhanced memory"""
     # Mark that we're in the AI Assistant tab
     st.session_state['current_tab'] = 'ai_assistant'
     
     chatbot = BuildingChatbot()
+    
+    # Display memory status
+    memory_info = chatbot.get_memory_info()
+    
+    # Memory status header
+    st.header("🤖 AI Building Analytics Assistant")
+    
+    # Memory status display
+    col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+    
+    with col1:
+        if memory_info["status"] == "enabled":
+            st.success("🧠 **Memory Enabled** - I remember our conversation!")
+        else:
+            st.info("💭 **Session Only** - Memory resets each session")
+    
+    with col2:
+        st.metric("Backend", memory_info.get("backend", "unknown").title())
+    
+    with col3:
+        st.metric("Messages", memory_info.get("message_count", 0))
+    
+    with col4:
+        if st.button("🗑️ Clear Memory"):
+            chatbot.clear_conversation_memory()
+            st.success("Memory cleared!")
+            st.rerun()
+    
+    # Show memory context if available
+    if memory_info["status"] == "enabled" and memory_info.get("message_count", 0) > 0:
+        with st.expander("🧠 Conversation Context", expanded=False):
+            st.write(f"**Context:** {memory_info.get('context', 'No context available')}")
+            
+            # Show available backends info
+            backends = memory_info.get("available_backends", {})
+            st.write("**Available Storage Options:**")
+            for backend, available in backends.items():
+                icon = "✅" if available else "❌"
+                st.write(f"{icon} {backend.title()}")
+    
+    # Render chat interface
     chatbot.render_chat_interface(current_df)
 
 

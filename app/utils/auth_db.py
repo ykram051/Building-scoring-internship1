@@ -16,9 +16,50 @@ from utils.logger import log_security_event, log_access_attempt, log_dataset_acc
 from utils.secure_auth import secure_auth
 
 def hash_password(password, salt=None):
-    """Create secure SHA-256 hash of a password with salt"""
-    if salt is None:
-        # For backward compatibility, use old method if no salt provided
+    """Create secure SHA-256 hash of a password with optional salt"""
+    if salt is not None:
+        password = f"{password}{salt}"
+    return hashlib.sha256(password.encode('utf-8')).hexdigest()
+
+def _check_fallback_ownership(dataset_name, username):
+    """Check dataset ownership using file-based ownership.json"""
+    try:
+        # Check multiple possible locations for ownership file
+        possible_paths = [
+            Path("data/user_datasets/ownership.json"),
+            Path("app/data/user_datasets/ownership.json"),
+            Path.cwd() / "data" / "user_datasets" / "ownership.json"
+        ]
+        
+        ownership_data = None
+        for ownership_file in possible_paths:
+            if ownership_file.exists():
+                try:
+                    with open(ownership_file, "r") as f:
+                        ownership_data = json.load(f)
+                    break
+                except (json.JSONDecodeError, IOError):
+                    continue
+        
+        if not ownership_data:
+            return False
+        
+        # Check if dataset exists and user owns it
+        dataset_info = ownership_data.get(dataset_name)
+        if not dataset_info:
+            return False
+        
+        # Handle both old and new ownership format
+        if isinstance(dataset_info, dict):
+            owner = dataset_info.get("owner", dataset_info.get("username"))
+        else:
+            owner = dataset_info  # Legacy format
+        
+        return owner == username
+        
+    except Exception as e:
+        logger.error(f"Error checking fallback ownership: {e}")
+        return False  # For backward compatibility, use old method if no salt provided
         return hashlib.sha256(password.encode()).hexdigest()
     else:
         # Use new secure method with salt
@@ -163,6 +204,9 @@ def require_permission(permission: str):
         st.error("Access denied: Insufficient permissions")
         st.stop()
 
+import logging
+logger = logging.getLogger(__name__)
+
 def check_dataset_ownership(dataset_name: str) -> dict:
     """Check dataset ownership with enhanced security"""
     try:
@@ -173,16 +217,30 @@ def check_dataset_ownership(dataset_name: str) -> dict:
         # Sanitize dataset name
         dataset_name = secure_auth.sanitize_input(dataset_name)
         
-        # Query database for dataset ownership
+        # First check the datasets table
         query = """
-            SELECT owner, created_at, is_public 
-            FROM dataset_ownership 
-            WHERE dataset_name = :dataset_name
+            SELECT owner, created_at, is_system 
+            FROM datasets 
+            WHERE name = :dataset_name
         """
         result = query_to_dataframe(query, {"dataset_name": dataset_name})
         
         if result.empty:
-            return {"owner": None, "has_access": False, "access_type": None}
+            # If not in database, check the file-based ownership
+            try:
+                from data.data_processing import get_dataset_ownership
+                ownership_info = get_dataset_ownership(dataset_name)
+                if ownership_info and 'owner' in ownership_info:
+                    owner = ownership_info['owner']
+                    is_system = False
+                else:
+                    return {"owner": None, "has_access": False, "access_type": None}
+            except Exception as e:
+                logger.error(f"Error checking file-based ownership: {e}")
+                return {"owner": None, "has_access": False, "access_type": None}
+        else:
+            owner = result.iloc[0]['owner']
+            is_system = result.iloc[0]['is_system']
         
         owner = result.iloc[0]['owner']
         is_public = result.iloc[0].get('is_public', False)
@@ -589,16 +647,26 @@ def check_dataset_ownership(dataset_name):
     Returns:
         bool: True if user owns the dataset or is an admin, False otherwise
     """
-    # Check if we should use fallback mode - if so, always allow access
-    try:
-        from utils.db import should_use_fallback
-        if should_use_fallback():
-            return True  # In fallback mode, allow all access
-    except ImportError:
-        pass
+    # Always validate authentication first
+    if not st.session_state.get("authenticated", False):
+        log_dataset_access(
+            username="unauthenticated",
+            dataset=dataset_name,
+            purpose="ownership_check_failed_not_authenticated"
+        )
+        return False
     
     username = st.session_state.get("username", "unknown")
     user_role = st.session_state.get("user_role")
+    
+    # Validate session integrity
+    if not username or username == "unknown":
+        log_dataset_access(
+            username="unknown",
+            dataset=dataset_name,
+            purpose="ownership_check_failed_invalid_session"
+        )
+        return False
     
     # Admins have ownership rights to all datasets
     if user_role == "admin":
@@ -608,6 +676,15 @@ def check_dataset_ownership(dataset_name):
             purpose="ownership_check_admin_access"
         )
         return True
+    
+    # Check if we should use fallback mode - but with proper validation
+    try:
+        from utils.db import should_use_fallback
+        if should_use_fallback():
+            # In fallback mode, check file-based ownership
+            return _check_fallback_ownership(dataset_name, username)
+    except ImportError:
+        pass
     
     try:
         # Check dataset ownership in the database
@@ -623,6 +700,10 @@ def check_dataset_ownership(dataset_name):
         
         is_owner = result[0][0] > 0 if result else False
         
+        # Also check file-based ownership as backup
+        if not is_owner:
+            is_owner = _check_fallback_ownership(dataset_name, username)
+        
         log_dataset_access(
             username=username,
             dataset=dataset_name,
@@ -635,8 +716,48 @@ def check_dataset_ownership(dataset_name):
         log_dataset_access(
             username=username,
             dataset=dataset_name,
-            purpose="ownership_check_error"
+            purpose=f"ownership_check_error:{str(e)}"
         )
+        return False
+
+def _check_fallback_ownership(dataset_name, username):
+    """Check dataset ownership using file-based ownership.json"""
+    try:
+        # Check multiple possible locations for ownership file
+        possible_paths = [
+            Path("data/user_datasets/ownership.json"),
+            Path("app/data/user_datasets/ownership.json"),
+            Path.cwd() / "data" / "user_datasets" / "ownership.json"
+        ]
+        
+        ownership_data = None
+        for ownership_file in possible_paths:
+            if ownership_file.exists():
+                try:
+                    with open(ownership_file, "r") as f:
+                        ownership_data = json.load(f)
+                    break
+                except (json.JSONDecodeError, IOError):
+                    continue
+        
+        if not ownership_data:
+            return False
+        
+        # Check if dataset exists and user owns it
+        dataset_info = ownership_data.get(dataset_name)
+        if not dataset_info:
+            return False
+        
+        # Handle both old and new ownership format
+        if isinstance(dataset_info, dict):
+            owner = dataset_info.get("owner", dataset_info.get("username"))
+        else:
+            owner = dataset_info  # Legacy format
+        
+        return owner == username
+        
+    except Exception as e:
+        logger.error(f"Error checking fallback ownership: {e}")
         return False
 
 def handle_unauthorized_access(dataset_name, action_type="view"):

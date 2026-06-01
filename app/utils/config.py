@@ -71,31 +71,3 @@ def is_database_enabled():
     In strict database-only mode, this always returns True.
     """
     return True
-
-def get_legacy_users():
-    """Load users from JSON file for migration purposes."""
-    if not USERS_FILE.exists():
-        logger.warning(f"No users file found at {USERS_FILE}")
-        return {}
-    
-    try:
-        with open(USERS_FILE, "r") as f:
-            users_data = json.load(f)
-        return users_data
-    except Exception as e:
-        logger.error(f"Error loading users file: {e}")
-        return {}
-
-def get_legacy_ownership():
-    """Load dataset ownership from JSON file for migration purposes."""
-    if not OWNERSHIP_FILE.exists():
-        logger.warning(f"No ownership file found at {OWNERSHIP_FILE}")
-        return {}
-    
-    try:
-        with open(OWNERSHIP_FILE, "r") as f:
-            ownership_data = json.load(f)
-        return ownership_data
-    except Exception as e:
-        logger.error(f"Error loading ownership file: {e}")
-        return {}
