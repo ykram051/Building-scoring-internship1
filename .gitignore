@@ -92,10 +92,11 @@ data/user_datasets/*.csv
 app/cache/
 .cache/
 .ruff_cache/
+app/.streamlit/secrets.toml
 
 # Documentation builds
 docs/_build/
-Secrets.toml
+
 # OS files
 .DS_Store
 .DS_Store?
