@@ -95,7 +95,7 @@ app/cache/
 
 # Documentation builds
 docs/_build/
-
+Secrets.toml
 # OS files
 .DS_Store
 .DS_Store?
